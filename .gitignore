@@ -1,0 +1,26 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Runtime data (do not commit)
+data/*
+!data/.gitkeep
+public/assets/*.map
+
+# PHP/SQLite runtime artifacts
+*.sqlite
+*.sqlite3
+*.db
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Large bundled folders not needed in repo
+openJdk-25/
+
+# Duplicate backend artifacts inside the original template folder
+templatemo_608_daynight_admin/public/

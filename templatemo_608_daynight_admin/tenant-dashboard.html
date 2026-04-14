@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tenant Dashboard - God's Time Lodge</title>
+    <script>
+        // Prevent flash of white in dark mode - runs before CSS/page render
+        if (localStorage.getItem('gods-time-logde-theme') === 'carbon') {
+            document.documentElement.classList.add('carbon');
+        }
+    </script>
+    <link rel="stylesheet" href="sbiam-style.css">
+    
+</head>
+<body>
+    <!-- Mobile Menu Overlay -->
+    <div class="mobile-menu-overlay"></div>
+    
+    <!-- Mobile Menu -->
+    <div class="mobile-menu">
+        <div class="mobile-menu-header">
+            <a href="tenant-dashboard.html" class="logo">
+                <div class="logo-icon logo-mark">GT</div><div class="logo-text"><div class="logo-name">God's Time Lodge</div><div class="logo-sub">Tenant Billing</div></div>
+            </a>
+            <button class="mobile-menu-close" onclick="closeMobileMenu()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+            </button>
+        </div>
+        <nav class="mobile-menu-nav">
+            <a href="tenant-dashboard.html" class="active">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="7" r="4"/>
+                    <path d="M5.5 21a6.5 6.5 0 0 1 13 0"/>
+                </svg>
+                Dashboard
+            </a>
+        </nav>
+        <div class="mobile-menu-footer">
+            <a href="login.html" class="mobile-logout-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                    <polyline points="16 17 21 12 16 7"/>
+                    <line x1="21" y1="12" x2="9" y2="12"/>
+                </svg>
+                Logout
+            </a>
+            <div class="theme-toggle">
+                <button class="theme-btn theme-btn-snow active" onclick="setTheme('snow')" title="Snow Edition">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="5"/>
+                        <line x1="12" y1="1" x2="12" y2="3"/>
+                        <line x1="12" y1="21" x2="12" y2="23"/>
+                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                        <line x1="1" y1="12" x2="3" y2="12"/>
+                        <line x1="21" y1="12" x2="23" y2="12"/>
+                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+                    </svg>
+                </button>
+                <button class="theme-btn theme-btn-carbon" onclick="setTheme('carbon')" title="Carbon Edition">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-container">
+        <!-- Top Navigation -->
+        <nav class="top-nav">
+            <div class="nav-container">
+                <div class="nav-left">
+                    <a href="index.html" class="logo">
+                        <div class="logo-icon logo-mark">GT</div><div class="logo-text"><div class="logo-name">God's Time Lodge</div><div class="logo-sub">Tenant Billing</div></div>
+                    </a>
+                    <div class="nav-menu">
+                        <div class="nav-item">
+                            <a href="index.html" class="nav-link">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="3" y="3" width="7" height="7" rx="1"/>
+                                    <rect x="14" y="3" width="7" height="7" rx="1"/>
+                                    <rect x="3" y="14" width="7" height="7" rx="1"/>
+                                    <rect x="14" y="14" width="7" height="7" rx="1"/>
+                                </svg>
+                                Dashboard
+                            </a>
+                        </div>                        <div class="nav-item">
+                            <a href="tenant-dashboard.html" class="nav-link active">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="7" r="4"/>
+                                    <path d="M5.5 21a6.5 6.5 0 0 1 13 0"/>
+                                </svg>
+                                Tenant Dashboard
+                            </a>
+                        </div>
+                        <div class="nav-item">
+                            <a href="projects.html" class="nav-link">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                                </svg>
+                                Projects
+                            </a>
+                        </div>
+                        <div class="nav-item">
+                            <a href="inbox.html" class="nav-link">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                                    <polyline points="22,6 12,13 2,6"/>
+                                </svg>
+                                Inbox
+                            </a>
+                        </div>
+                        <div class="nav-item">
+                            <a href="analytics.html" class="nav-link">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="18" y1="20" x2="18" y2="10"/>
+                                    <line x1="12" y1="20" x2="12" y2="4"/>
+                                    <line x1="6" y1="20" x2="6" y2="14"/>
+                                </svg>
+                                Analytics
+                            </a>
+                        </div>
+                        <div class="nav-item">
+                            <a href="settings.html" class="nav-link">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="3"/>
+                                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                                </svg>
+                                Settings
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <div class="nav-right">
+                    <div class="theme-toggle">
+                        <button class="theme-btn theme-btn-snow active" onclick="setTheme('snow')" title="Snow Edition">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="5"/>
+                                <line x1="12" y1="1" x2="12" y2="3"/>
+                                <line x1="12" y1="21" x2="12" y2="23"/>
+                                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+                                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                                <line x1="1" y1="12" x2="3" y2="12"/>
+                                <line x1="21" y1="12" x2="23" y2="12"/>
+                                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+                                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+                            </svg>
+                        </button>
+                        <button class="theme-btn theme-btn-carbon" onclick="setTheme('carbon')" title="Carbon Edition">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <button class="user-menu">
+                        <div class="user-avatar">A</div>
+                        <span class="user-name">Tenant</span>
+                    </button>
+                    <a href="login.html" class="btn-logout" title="Logout">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                            <polyline points="16 17 21 12 16 7"/>
+                            <line x1="21" y1="12" x2="9" y2="12"/>
+                        </svg>
+                    </a>
+                    <button class="mobile-menu-btn" onclick="toggleMobileMenu()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="3" y1="12" x2="21" y2="12"/>
+                            <line x1="3" y1="6" x2="21" y2="6"/>
+                            <line x1="3" y1="18" x2="21" y2="18"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+                        <main class="main-content">
+            <!-- Page Header -->
+            <div class="page-header">
+                <h1 class="greeting">Welcome, Tenant</h1>
+                <p class="greeting-sub">Your bills, payment history, and service requests in one place.</p>
+            </div>
+
+            <!-- Stats Grid -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Current Balance</div>
+                    <div class="stat-value">₦152,700</div>
+                    <div class="stat-change negative">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/>
+                            <polyline points="17 18 23 18 23 12"/>
+                        </svg>
+                        Due in 5 days
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Next Due Date</div>
+                    <div class="stat-value">May 5, 2026</div>
+                    <div class="stat-change">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M12 6v6l4 2"/>
+                        </svg>
+                        Rent + utilities
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Last Payment</div>
+                    <div class="stat-value">₦280,000</div>
+                    <div class="stat-change positive">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
+                            <polyline points="17 6 23 6 23 12"/>
+                        </svg>
+                        Apr 3, 2026
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Payment Status</div>
+                    <div class="stat-value">Partial</div>
+                    <div class="stat-change">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M12 8v4l3 3"/>
+                        </svg>
+                        ₦52,700 remaining
+                    </div>
+                </div>
+            </div>
+
+            <!-- Two Column Layout -->
+            <div class="two-col">
+                <!-- Pay Now -->
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h3 class="card-title">Pay Now</h3>
+                            <p class="card-subtitle">Choose a bill and complete payment</p>
+                        </div>
+                    </div>
+                    <div style="display: grid; gap: 1rem;">
+                        <div class="form-group">
+                            <label class="form-label" for="tenantBill">Bill Type</label>
+                            <select class="form-input" id="tenantBill">
+                                <option>April Rent</option>
+                                <option>Electricity</option>
+                                <option>Water</option>
+                                <option>Maintenance</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="tenantAmount">Amount</label>
+                            <input class="form-input" id="tenantAmount" type="text" value="₦152,700">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="tenantMethod">Payment Method</label>
+                            <select class="form-input" id="tenantMethod">
+                                <option>Bank Transfer</option>
+                                <option>Card</option>
+                                <option>Mobile Money</option>
+                                <option>Cash</option>
+                            </select>
+                        </div>
+                        <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+                            <button class="btn">Pay Now</button>
+                            <button class="btn btn-secondary">Download Invoice</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Current Bills -->
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h3 class="card-title">Current Bills</h3>
+                            <p class="card-subtitle">Breakdown of what you owe</p>
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr><th>Description</th><th>Amount</th><th>Status</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr><td>Monthly Rent</td><td>₦300,000</td><td><span class="badge badge-orange">Partial</span></td></tr>
+                                <tr><td>Electricity</td><td>₦28,500</td><td><span class="badge badge-orange">Pending</span></td></tr>
+                                <tr><td>Water</td><td>₦7,200</td><td><span class="badge badge-green">Paid</span></td></tr>
+                                <tr><td>Maintenance</td><td>₦12,000</td><td><span class="badge badge-green">Paid</span></td></tr>
+                                <tr><td>Late Fee</td><td>₦5,000</td><td><span class="badge badge-red">Overdue</span></td></tr>
+                                <tr><td style="font-weight: 600;">Balance Due</td><td style="font-weight: 600;">₦152,700</td><td></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Payments -->
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <h3 class="card-title">Payment History</h3>
+                        <p class="card-subtitle">Your recent payments and receipts</p>
+                    </div>
+                    <button class="btn btn-ghost">View All</button>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr><th>Date</th><th>Bill</th><th>Amount</th><th>Status</th><th>Receipt</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>Apr 3, 2026</td><td>Rent</td><td>₦280,000</td><td><span class="badge badge-green">Paid</span></td><td><a href="#">Download</a></td></tr>
+                            <tr><td>Apr 7, 2026</td><td>Electricity</td><td>₦22,500</td><td><span class="badge badge-orange">Pending</span></td><td><a href="#">View</a></td></tr>
+                            <tr><td>Mar 5, 2026</td><td>Rent</td><td>₦300,000</td><td><span class="badge badge-green">Paid</span></td><td><a href="#">Download</a></td></tr>
+                            <tr><td>Mar 10, 2026</td><td>Water</td><td>₦6,500</td><td><span class="badge badge-green">Paid</span></td><td><a href="#">Download</a></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Maintenance Requests -->
+            <div class="card" style="margin-top: 1.5rem;">
+                <div class="card-header">
+                    <div>
+                        <h3 class="card-title">Maintenance Requests</h3>
+                        <p class="card-subtitle">Track service requests for your unit</p>
+                    </div>
+                    <button class="btn btn-secondary">New Request</button>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr><th>Issue</th><th>Date</th><th>Status</th><th>Assigned To</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>Leaking kitchen tap</td><td>Apr 6, 2026</td><td><span class="badge badge-orange">In Progress</span></td><td>Maintenance Team</td></tr>
+                            <tr><td>Broken hallway light</td><td>Mar 29, 2026</td><td><span class="badge badge-green">Resolved</span></td><td>Electrician</td></tr>
+                            <tr><td>Window latch repair</td><td>Mar 18, 2026</td><td><span class="badge badge-green">Resolved</span></td><td>Carpenter</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>&copy; 2026 Sbiam Solutions. All rights reserved.</p>
+        </footer>
+    </div>
+
+    <script src="sbiam-script.js"></script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,18 @@
+Run Backend Now (No PHP Needed)
+===============================
+
+Start server:
+  node node-server.js
+
+Open in browser:
+  http://127.0.0.1:3000/register
+
+Routes:
+  /register
+  /login
+  /tenant/dashboard
+  /admin/dashboard
+
+Default admin (auto-created in data/node-db.json):
+  admin@godstimelodge.com / admin123
+
