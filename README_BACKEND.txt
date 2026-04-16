@@ -77,5 +77,6 @@ In Render, the app is now configured to store this data on the mounted disk at:
 If you remove the disk, the app falls back to the local ./data folder again.
 
 Tip:
-Set ADMIN_PASSWORD in Render before the first deploy if you do not want the
-default admin password to be written into the disk-backed data file.
+The Blueprint now marks ADMIN_PASSWORD as a secret prompt in Render
+(`sync: false`), so Render should ask for it during the first Blueprint setup.
+If you skip it, the app falls back to the default admin password.
