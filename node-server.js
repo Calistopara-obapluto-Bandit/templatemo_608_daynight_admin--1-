@@ -428,5 +428,4 @@ server.listen(PORT, HOST, () => {
   console.log("Tenant dashboard: /tenant/dashboard");
   console.log("Admin tenants: /admin/tenants");
   console.log(`Admin login: ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}`);
->>>>>>> 6a71238 (Prepare app for Render deployment)
 });
