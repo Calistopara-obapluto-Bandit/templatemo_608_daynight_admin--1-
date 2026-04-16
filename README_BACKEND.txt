@@ -33,3 +33,49 @@ Default credentials:
   admin@godstimelodge.com / admin123
 
 Change the password after setup.
+
+Deploy on Render
+----------------
+This repo can be deployed on Render as a Node Web Service using the Node app in:
+
+  node-server.js
+
+Files added for deployment:
+
+  package.json
+  render.yaml
+
+Manual Render settings:
+
+  Runtime: Node
+  Build Command: npm install
+  Start Command: npm start
+  Health Check Path: /healthz
+  Plan: Starter or higher
+
+Persistent disk settings:
+
+  Mount Path: /var/data
+  Size: 1 GB
+
+Environment variable:
+
+  DATA_DIR=/var/data
+  ADMIN_EMAIL=admin@godstimelodge.com
+  ADMIN_PASSWORD=change-this-password
+  COOKIE_SECURE=true
+
+Important:
+The app currently stores users in:
+
+  data/node-db.json
+
+In Render, the app is now configured to store this data on the mounted disk at:
+
+  /var/data/node-db.json
+
+If you remove the disk, the app falls back to the local ./data folder again.
+
+Tip:
+Set ADMIN_PASSWORD in Render before the first deploy if you do not want the
+default admin password to be written into the disk-backed data file.
