@@ -1,0 +1,13 @@
+{
+  "name": "gods-time-lodge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Node web app for God's Time Lodge tenant billing demo.",
+  "main": "node-server.js",
+  "scripts": {
+    "start": "node node-server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
