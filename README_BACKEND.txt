@@ -60,6 +60,7 @@ Persistent disk settings:
 
 Environment variable:
 
+  NODE_ENV=production
   DATA_DIR=/var/data
   ADMIN_EMAIL=admin@godstimelodge.com
   ADMIN_PASSWORD=change-this-password
@@ -75,6 +76,11 @@ In Render, the app is now configured to store this data on the mounted disk at:
   /var/data/node-db.json
 
 If you remove the disk, the app falls back to the local ./data folder again.
+
+Production notes:
+  - The server now exposes /healthz and checks that the data directory/database are readable.
+  - Startup logs no longer print the admin password.
+  - Keep ADMIN_PASSWORD set to a strong secret in Render before first launch.
 
 Tip:
 The Blueprint now marks ADMIN_PASSWORD as a secret prompt in Render

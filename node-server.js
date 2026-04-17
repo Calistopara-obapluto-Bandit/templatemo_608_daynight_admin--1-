@@ -11,7 +11,9 @@ const DATA_DIR = process.env.DATA_DIR
   : path.join(__dirname, "data");
 const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || "admin@godstimelodge.com").trim().toLowerCase();
 const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || "admin123");
+const IS_DEFAULT_ADMIN_PASSWORD = ADMIN_PASSWORD === "admin123";
 const COOKIE_SECURE = String(process.env.COOKIE_SECURE || "").toLowerCase() === "true";
+const MAX_BODY_SIZE = 1024 * 1024;
 const DB_PATH = path.join(DATA_DIR, "node-db.json");
 const PUBLIC_DIR = path.join(__dirname, "public");
 const ASSETS_DIR = path.join(PUBLIC_DIR, "assets");
@@ -104,19 +106,30 @@ function buildSessionCookie(sid, maxAge = null) {
 }
 
 function send(res, status, body, headers = {}) {
-  res.writeHead(status, { "Content-Type": "text/html; charset=utf-8", ...headers });
+  res.writeHead(status, {
+    "Content-Type": "text/html; charset=utf-8",
+    "Cache-Control": "no-store",
+    ...headers,
+  });
   res.end(body);
 }
 
-function sendText(res, status, body) {
-  res.writeHead(status, { "Content-Type": "text/plain; charset=utf-8" });
+function sendText(res, status, body, headers = {}) {
+  res.writeHead(status, { "Content-Type": "text/plain; charset=utf-8", ...headers });
   res.end(body);
 }
 
 function readBody(req) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let data = "";
-    req.on("data", (chunk) => (data += chunk));
+    req.on("data", (chunk) => {
+      data += chunk;
+      if (data.length > MAX_BODY_SIZE) {
+        reject(new Error("Body too large"));
+        req.destroy();
+      }
+    });
+    req.on("error", reject);
     req.on("end", () => resolve(data));
   });
 }
@@ -139,6 +152,27 @@ function escapeHtml(s) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function applySecurityHeaders(res) {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "same-origin");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
+}
+
+function checkHealth() {
+  ensureDataDir();
+  const db = loadDb();
+  return {
+    ok: true,
+    users: Array.isArray(db.users) ? db.users.length : 0,
+  };
+}
+
+function isFormRequest(req) {
+  const contentType = String(req.headers["content-type"] || "").toLowerCase();
+  return contentType.includes("application/x-www-form-urlencoded");
 }
 
 function htmlPage(title, inner) {
@@ -337,100 +371,128 @@ function serveStatic(res, pathname) {
 }
 
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  const pathname = url.pathname;
-  const method = (req.method || "GET").toUpperCase();
+  try {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const pathname = url.pathname;
+    const method = (req.method || "GET").toUpperCase();
 
-  if (serveStatic(res, pathname)) return;
+    applySecurityHeaders(res);
 
-  if (pathname === "/healthz") {
-    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-    return res.end(JSON.stringify({ ok: true }));
-  }
+    if (serveStatic(res, pathname)) return;
 
-  if (pathname === "/") {
-    const user = getCurrentUser(req);
-    if (user) {
-      return redirect(res, user.role === "tenant" ? "/tenant/dashboard" : "/admin/dashboard");
+    if (pathname === "/healthz") {
+      try {
+        const health = checkHealth();
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        return res.end(JSON.stringify(health));
+      } catch (error) {
+        res.writeHead(500, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        return res.end(JSON.stringify({ ok: false, error: "healthcheck_failed" }));
+      }
     }
-    const landingFile = path.join(PUBLIC_DIR, "landing.html");
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-    return fs.createReadStream(landingFile).pipe(res);
-  }
 
-  if (pathname === "/login") {
-    if (method === "GET") return send(res, 200, loginView());
-    const body = await readBody(req);
-    const form = parseForm(body);
-    const email = String(form.email || "").trim().toLowerCase();
-    const password = String(form.password || "");
-    const db = loadDb();
-    const user = db.users.find((u) => u.email === email);
-    if (!user) return send(res, 401, loginView("Invalid email or password."));
-    const hash = pbkdf2Hash(password, user.saltHex);
-    if (hash !== user.passwordHash) return send(res, 401, loginView("Invalid email or password."));
-
-    const sid = randomId(18);
-    sessions.set(sid, user.id);
-    res.setHeader("Set-Cookie", buildSessionCookie(sid));
-    return redirect(res, "/");
-  }
-
-  if (pathname === "/register") {
-    if (method === "GET") return send(res, 200, registerView());
-    const body = await readBody(req);
-    const form = parseForm(body);
-    const fullName = String(form.full_name || "").trim();
-    const unit = String(form.unit || "").trim();
-    const email = String(form.email || "").trim().toLowerCase();
-    const password = String(form.password || "");
-    if (!fullName || !email || !password) return send(res, 400, registerView("Please fill all required fields."));
-    if (password.length < 6) return send(res, 400, registerView("Password must be at least 6 characters."));
-
-    const db = loadDb();
-    if (db.users.some((u) => u.email === email)) return send(res, 400, registerView("This email is already registered."));
-    const tenant = createUser({ email, password, role: "tenant", fullName, unit });
-    db.users.push(tenant);
-    saveDb(db);
-
-    const sid = randomId(18);
-    sessions.set(sid, tenant.id);
-    res.setHeader("Set-Cookie", buildSessionCookie(sid));
-    return redirect(res, "/tenant/dashboard");
-  }
-
-  if (pathname === "/logout") {
-    const cookies = parseCookies(req);
-    const sid = cookies.gtl_session;
-    if (sid) sessions.delete(sid);
-    res.setHeader("Set-Cookie", buildSessionCookie("", 0));
-    return redirect(res, "/login");
-  }
-
-  if (pathname === "/tenant/dashboard") {
-    const user = requireRole(req, res, "tenant");
-    if (!user) return;
-    return send(res, 200, tenantDashboardView(user));
-  }
-
-  if (pathname === "/admin/dashboard") {
-    const user = requireRole(req, res, "admin");
-    if (!user) return;
-    const adminFile = path.join(PUBLIC_DIR, "admin-dashboard.html");
-    if (fs.existsSync(adminFile)) {
+    if (pathname === "/") {
+      const user = getCurrentUser(req);
+      if (user) {
+        return redirect(res, user.role === "tenant" ? "/tenant/dashboard" : "/admin/dashboard");
+      }
+      const landingFile = path.join(PUBLIC_DIR, "landing.html");
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      return fs.createReadStream(adminFile).pipe(res);
+      return fs.createReadStream(landingFile).pipe(res);
     }
-    return sendText(res, 500, "Admin dashboard not found.");
-  }
 
-  sendText(res, 404, "Not found");
+    if (pathname === "/login") {
+      if (method === "GET") return send(res, 200, loginView());
+      if (method !== "POST") return sendText(res, 405, "Method Not Allowed", { Allow: "GET, POST" });
+      if (!isFormRequest(req)) return send(res, 415, loginView("Unsupported form submission."));
+      const body = await readBody(req);
+      const form = parseForm(body);
+      const email = String(form.email || "").trim().toLowerCase();
+      const password = String(form.password || "");
+      const db = loadDb();
+      const user = db.users.find((u) => u.email === email);
+      if (!user) return send(res, 401, loginView("Invalid email or password."));
+      const hash = pbkdf2Hash(password, user.saltHex);
+      if (hash !== user.passwordHash) return send(res, 401, loginView("Invalid email or password."));
+
+      const sid = randomId(18);
+      sessions.set(sid, user.id);
+      res.setHeader("Set-Cookie", buildSessionCookie(sid));
+      return redirect(res, "/");
+    }
+
+    if (pathname === "/register") {
+      if (method === "GET") return send(res, 200, registerView());
+      if (method !== "POST") return sendText(res, 405, "Method Not Allowed", { Allow: "GET, POST" });
+      if (!isFormRequest(req)) return send(res, 415, registerView("Unsupported form submission."));
+      const body = await readBody(req);
+      const form = parseForm(body);
+      const fullName = String(form.full_name || "").trim();
+      const unit = String(form.unit || "").trim();
+      const email = String(form.email || "").trim().toLowerCase();
+      const password = String(form.password || "");
+      if (!fullName || !email || !password) return send(res, 400, registerView("Please fill all required fields."));
+      if (password.length < 6) return send(res, 400, registerView("Password must be at least 6 characters."));
+
+      const db = loadDb();
+      if (db.users.some((u) => u.email === email)) return send(res, 400, registerView("This email is already registered."));
+      const tenant = createUser({ email, password, role: "tenant", fullName, unit });
+      db.users.push(tenant);
+      saveDb(db);
+
+      const sid = randomId(18);
+      sessions.set(sid, tenant.id);
+      res.setHeader("Set-Cookie", buildSessionCookie(sid));
+      return redirect(res, "/tenant/dashboard");
+    }
+
+    if (pathname === "/logout") {
+      if (method !== "GET" && method !== "POST") return sendText(res, 405, "Method Not Allowed", { Allow: "GET, POST" });
+      const cookies = parseCookies(req);
+      const sid = cookies.gtl_session;
+      if (sid) sessions.delete(sid);
+      res.setHeader("Set-Cookie", buildSessionCookie("", 0));
+      return redirect(res, "/login");
+    }
+
+    if (pathname === "/tenant/dashboard") {
+      const user = requireRole(req, res, "tenant");
+      if (!user) return;
+      return send(res, 200, tenantDashboardView(user));
+    }
+
+    if (pathname === "/admin/dashboard") {
+      const user = requireRole(req, res, "admin");
+      if (!user) return;
+      const adminFile = path.join(PUBLIC_DIR, "admin-dashboard.html");
+      if (fs.existsSync(adminFile)) {
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+        return fs.createReadStream(adminFile).pipe(res);
+      }
+      return sendText(res, 500, "Admin dashboard not found.");
+    }
+
+    sendText(res, 404, "Not found");
+  } catch (error) {
+    if (res.headersSent) {
+      res.end();
+      return;
+    }
+    if (error && error.message === "Body too large") {
+      return sendText(res, 413, "Payload Too Large", { "Cache-Control": "no-store" });
+    }
+    console.error("Unhandled request error", error);
+    return sendText(res, 500, "Internal Server Error", { "Cache-Control": "no-store" });
+  }
 });
 
 server.listen(PORT, HOST, () => {
   console.log(`Server running at http://${HOST}:${PORT}`);
   console.log("Tenant register: /register");
   console.log("Tenant dashboard: /tenant/dashboard");
-  console.log("Admin tenants: /admin/tenants");
-  console.log(`Admin login: ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}`);
+  console.log("Admin dashboard: /admin/dashboard");
+  console.log(`Admin login email: ${ADMIN_EMAIL}`);
+  if (IS_DEFAULT_ADMIN_PASSWORD) {
+    console.warn("Warning: ADMIN_PASSWORD is using the default value. Set a strong secret before production use.");
+  }
 });
