@@ -629,8 +629,8 @@ function tenantDashboardView(user, db, flash = "") {
     navLinks: tenantNavLinks(),
     activePath: "/tenant/dashboard",
     showThemeToggle: true,
-    showNavLinks: false,
-    showMobileMenu: false,
+    showNavLinks: true,
+    showMobileMenu: true,
     logoSub: "Tenant Billing",
   });
 
@@ -673,8 +673,8 @@ function tenantDashboardView(user, db, flash = "") {
           <div class="card">
             <div class="card-header">
               <div>
-                <h3 class="card-title">My Account</h3>
-                <p class="card-subtitle">Your current tenant profile details</p>
+                <h3 class="card-title">Account Snapshot</h3>
+                <p class="card-subtitle">Quick details for your tenant profile</p>
               </div>
               <a href="/tenant/account" class="btn btn-secondary">Open page</a>
             </div>
@@ -684,154 +684,37 @@ function tenantDashboardView(user, db, flash = "") {
               <div><strong>Unit:</strong> ${escapeHtml(user.unit || "Not assigned")}</div>
               <div><strong>Role:</strong> Tenant</div>
               <div><strong>Access:</strong> Protected by login</div>
-              <div><strong>Total Paid:</strong> ${formatCurrency(totalPaid)}</div>
             </div>
           </div>
 
           <div class="card">
             <div class="card-header">
               <div>
-                <h3 class="card-title">Make a Payment</h3>
-                <p class="card-subtitle">Submit a payment record for admin approval</p>
-              </div>
-            </div>
-            <form method="post" action="/tenant/payments" style="padding:1rem 1.25rem; display:grid; gap:0.85rem;">
-              <div class="form-group">
-                <label class="form-label">Bill</label>
-                <select name="bill_id" class="form-input">${billOptions}</select>
-              </div>
-              <div class="form-group">
-                <label class="form-label">Amount</label>
-                <input name="amount" type="number" min="0" step="100" class="form-input" placeholder="e.g. 250000" required />
-              </div>
-              <div class="form-group">
-                <label class="form-label">Note</label>
-                <input name="note" type="text" class="form-input" placeholder="Transfer reference or short note" />
-              </div>
-              <button type="submit" class="btn btn-primary">Submit Payment</button>
-            </form>
-          </div>
-        </div>
-
-        <div class="two-col" style="margin-top: 1.5rem;">
-          <div class="card">
-            <div class="card-header">
-              <div>
-                <h3 class="card-title">My Bills</h3>
-                <p class="card-subtitle">Charges assigned to your account</p>
-              </div>
-            </div>
-            <div class="card-scroll">
-              <div class="card-scroll-inner" style="min-width: 520px;">
-                <table style="width:100%; border-collapse:collapse;">
-                  <thead>
-                    <tr style="text-align:left; color:var(--text-secondary); border-bottom:1px solid var(--border);">
-                      <th style="padding:0.9rem 0.75rem;">Bill</th>
-                      <th style="padding:0.9rem 0.75rem;">Amount</th>
-                      <th style="padding:0.9rem 0.75rem;">Due Date</th>
-                      <th style="padding:0.9rem 0.75rem;">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>${billRows}</tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-
-          <div class="card">
-            <div class="card-header">
-              <div>
-                <h3 class="card-title">Maintenance Request</h3>
-                <p class="card-subtitle">Tell management what needs attention</p>
-              </div>
-            </div>
-            <form method="post" action="/tenant/requests" style="padding:1rem 1.25rem; display:grid; gap:0.85rem;">
-              <div class="form-group">
-                <label class="form-label">Title</label>
-                <input name="title" type="text" class="form-input" placeholder="e.g. Water leak in bathroom" required />
-              </div>
-              <div class="form-group">
-                <label class="form-label">Description</label>
-                <textarea name="description" class="form-input" rows="4" placeholder="Describe the issue in a few words" required></textarea>
-              </div>
-              <button type="submit" class="btn btn-primary">Send Request</button>
-            </form>
-          </div>
-        </div>
-
-        <div class="two-col" style="margin-top: 1.5rem;">
-          <div class="card">
-            <div class="card-header">
-              <div>
-                <h3 class="card-title">Payment History</h3>
-                <p class="card-subtitle">Your recent submitted payments</p>
-              </div>
-            </div>
-            <div class="card-scroll">
-              <div class="card-scroll-inner" style="min-width:340px;">
-                <div class="activity-feed">${paymentItems}</div>
-              </div>
-            </div>
-          </div>
-
-          <div class="card">
-            <div class="card-header">
-              <div>
-                <h3 class="card-title">Maintenance Updates</h3>
-                <p class="card-subtitle">Track your open and completed requests</p>
-              </div>
-            </div>
-            <div class="card-scroll">
-              <div class="card-scroll-inner" style="min-width:340px;">
-                <div class="activity-feed">${requestItems}</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="two-col" style="margin-top: 1.5rem;">
-          <div class="card">
-            <div class="card-header">
-              <div>
-                <h3 class="card-title">Community Snapshot</h3>
-                <p class="card-subtitle">Other recently registered tenants</p>
-              </div>
-            </div>
-            <div class="card-scroll">
-              <div class="card-scroll-inner" style="min-width: 340px;">
-                <div class="activity-feed">${neighborItems}</div>
-              </div>
-            </div>
-          </div>
-
-          <div class="card">
-            <div class="card-header">
-              <div>
-                <h3 class="card-title">Lodge Overview</h3>
-                <p class="card-subtitle">Shared occupancy progress</p>
+                <h3 class="card-title">Lodge Status</h3>
+                <p class="card-subtitle">General overview of your account standing</p>
               </div>
             </div>
             <div style="padding: 1rem 1.25rem; display: grid; gap: 1rem;">
               <div>
                 <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
-                  <span>Occupancy</span>
-                  <strong>${occupancyRate}%</strong>
+                  <span>Outstanding bills</span>
+                  <strong>${formatCurrency(totalDue)}</strong>
                 </div>
-                <div class="progress-bar"><div class="progress-fill success" style="width: ${occupancyRate}%;"></div></div>
+                <div class="progress-bar"><div class="progress-fill warning" style="width: ${bills.length ? Math.max(15, 100 - Math.min(100, totalDue / 1000)) : 100}%;"></div></div>
               </div>
               <div>
                 <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
-                  <span>Tenant registrations</span>
-                  <strong>${tenants.length}</strong>
+                  <span>Paid this cycle</span>
+                  <strong>${formatCurrency(totalPaid)}</strong>
                 </div>
-                <div class="progress-bar"><div class="progress-fill accent" style="width: ${percentage(tenants.length, totalUnits)}%;"></div></div>
+                <div class="progress-bar"><div class="progress-fill success" style="width: ${Math.min(100, (totalPaid / Math.max(1, totalDue + totalPaid)) * 100)}%;"></div></div>
               </div>
               <div>
                 <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
-                  <span>My portal setup</span>
-                  <strong>${user.unit ? "100%" : "80%"}</strong>
+                  <span>Portal setup</span>
+                  <strong>${user.unit ? "Ready" : "Pending"}</strong>
                 </div>
-                <div class="progress-bar"><div class="progress-fill warning" style="width: ${user.unit ? 100 : 80}%;"></div></div>
+                <div class="progress-bar"><div class="progress-fill accent" style="width: ${user.unit ? 100 : 60}%;"></div></div>
               </div>
             </div>
           </div>
@@ -1257,8 +1140,8 @@ function adminDashboardView(user, db, flash = "") {
     navLinks: adminNavLinks(),
     activePath: "/admin/dashboard",
     showThemeToggle: true,
-    showNavLinks: false,
-    showMobileMenu: false,
+    showNavLinks: true,
+    showMobileMenu: true,
     logoSub: "Admin Dashboard",
   });
 
@@ -1298,81 +1181,34 @@ function adminDashboardView(user, db, flash = "") {
         </div>
 
         <div class="two-col">
-          <div class="card" id="tenants">
-            <div class="card-header">
-              <div>
-                <h3 class="card-title">Tenant Directory</h3>
-                <p class="card-subtitle">Live tenant records from the registration system</p>
-              </div>
-            </div>
-            <div class="card-scroll">
-              <div class="card-scroll-inner" style="min-width: 700px;">
-                <table style="width: 100%; border-collapse: collapse;">
-                  <thead>
-                    <tr style="text-align: left; color: var(--text-secondary); border-bottom: 1px solid var(--border);">
-                      <th style="padding: 0.9rem 0.75rem;">Tenant</th>
-                      <th style="padding: 0.9rem 0.75rem;">Unit</th>
-                      <th style="padding: 0.9rem 0.75rem;">Joined</th>
-                      <th style="padding: 0.9rem 0.75rem;">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>${tenantRows}</tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-
           <div class="card">
             <div class="card-header">
               <div>
-                <h3 class="card-title">Create New Bill</h3>
-                <p class="card-subtitle">Assign a charge to a tenant account</p>
+                <h3 class="card-title">Lodge Snapshot</h3>
+                <p class="card-subtitle">A quick read on the property today</p>
               </div>
             </div>
-            <form method="post" action="/admin/bills" style="padding:1rem 1.25rem; display:grid; gap:0.85rem;">
-              <div class="form-group">
-                <label class="form-label">Tenant</label>
-                <select name="tenant_id" class="form-input">${billTenantOptions}</select>
-              </div>
-              <div class="form-group">
-                <label class="form-label">Bill Title</label>
-                <input name="title" type="text" class="form-input" placeholder="e.g. April Rent" required />
-              </div>
-              <div class="form-group">
-                <label class="form-label">Amount</label>
-                <input name="amount" type="number" min="0" step="100" class="form-input" placeholder="e.g. 250000" required />
-              </div>
-              <div class="form-group">
-                <label class="form-label">Due Date</label>
-                <input name="due_date" type="date" class="form-input" required />
-              </div>
-              <button type="submit" class="btn btn-primary">Create Bill</button>
-            </form>
-          </div>
-        </div>
-
-        <div class="two-col" style="margin-top: 1.5rem;">
-          <div class="card">
-            <div class="card-header">
+            <div style="padding: 1rem 1.25rem; display: grid; gap: 1rem;">
               <div>
-                <h3 class="card-title">Recent Bills</h3>
-                <p class="card-subtitle">Latest charges across all tenants</p>
+                <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
+                  <span>Tenant accounts</span>
+                  <strong>${tenants.length}</strong>
+                </div>
+                <div class="progress-bar"><div class="progress-fill accent" style="width: ${percentage(tenants.length, totalUnits)}%;"></div></div>
               </div>
-            </div>
-            <div class="card-scroll">
-              <div class="card-scroll-inner" style="min-width:700px;">
-                <table style="width:100%; border-collapse:collapse;">
-                  <thead>
-                    <tr style="text-align:left; color:var(--text-secondary); border-bottom:1px solid var(--border);">
-                      <th style="padding:0.9rem 0.75rem;">Bill</th>
-                      <th style="padding:0.9rem 0.75rem;">Tenant</th>
-                      <th style="padding:0.9rem 0.75rem;">Amount</th>
-                      <th style="padding:0.9rem 0.75rem;">Due Date</th>
-                      <th style="padding:0.9rem 0.75rem;">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>${billTableRows}</tbody>
-                </table>
+              <div>
+                <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
+                  <span>Occupied units</span>
+                  <strong>${occupiedUnits}</strong>
+                </div>
+                <div class="progress-bar"><div class="progress-fill success" style="width: ${occupancyRate}%;"></div></div>
+              </div>
+              <div>
+                <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
+                  <span>Open items</span>
+                  <strong>${bills.filter((bill) => bill.status !== "paid").length + maintenanceRequests.filter((request) => request.status !== "resolved").length}</strong>
+                </div>
+                <div class="progress-bar"><div class="progress-fill warning" style="width: ${Math.min(100, (bills.filter((bill) => bill.status !== "paid").length + maintenanceRequests.filter((request) => request.status !== "resolved").length) * 10)}%;"></div></div>
               </div>
             </div>
           </div>
@@ -1387,36 +1223,6 @@ function adminDashboardView(user, db, flash = "") {
             <div class="card-scroll">
               <div class="card-scroll-inner" style="min-width: 340px;">
                 <div class="activity-feed">${activityItems}</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="two-col" style="margin-top: 1.5rem;">
-          <div class="card">
-            <div class="card-header">
-              <div>
-                <h3 class="card-title">Payment Queue</h3>
-                <p class="card-subtitle">Submitted tenant payments</p>
-              </div>
-            </div>
-            <div class="card-scroll">
-              <div class="card-scroll-inner" style="min-width: 340px;">
-                <div class="activity-feed">${paymentItems}</div>
-              </div>
-            </div>
-          </div>
-
-          <div class="card">
-            <div class="card-header">
-              <div>
-                <h3 class="card-title">Maintenance Queue</h3>
-                <p class="card-subtitle">Incoming tenant requests</p>
-              </div>
-            </div>
-            <div class="card-scroll">
-              <div class="card-scroll-inner" style="min-width: 340px;">
-                <div class="activity-feed">${requestItems}</div>
               </div>
             </div>
           </div>
