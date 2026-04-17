@@ -568,6 +568,38 @@ function tenantDashboardView(user, db, flash = "") {
                   Dashboard
                 </a>
               </div>
+              <div class="nav-item">
+                <a href="/tenant/bills" class="nav-link">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="13" y2="15"/>
+                  </svg>
+                  Bills
+                </a>
+              </div>
+              <div class="nav-item">
+                <a href="/tenant/payments" class="nav-link">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                  </svg>
+                  Payments
+                </a>
+              </div>
+              <div class="nav-item">
+                <a href="/tenant/requests" class="nav-link">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                  </svg>
+                  Maintenance
+                </a>
+              </div>
+              <div class="nav-item">
+                <a href="/tenant/account" class="nav-link">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4z"/><path d="M4 21a8 8 0 0 1 16 0"/>
+                  </svg>
+                  Account
+                </a>
+              </div>
             </div>
           </div>
           <div class="nav-right">
@@ -1227,11 +1259,27 @@ function adminDashboardView(user, db, flash = "") {
                 </a>
               </div>
               <div class="nav-item">
-                <a href="#tenants" class="nav-link">
+                <a href="/admin/bills" class="nav-link">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0 1 13 0"/>
+                    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="13" y2="15"/>
                   </svg>
-                  Tenants
+                  Bills
+                </a>
+              </div>
+              <div class="nav-item">
+                <a href="/admin/payments" class="nav-link">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                  </svg>
+                  Payments
+                </a>
+              </div>
+              <div class="nav-item">
+                <a href="/admin/maintenance" class="nav-link">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                  </svg>
+                  Maintenance
                 </a>
               </div>
             </div>
