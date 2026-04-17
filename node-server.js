@@ -116,7 +116,7 @@ function loadDb() {
     const db = { users: [admin], sessions: [], bills: [], payments: [], maintenanceRequests: [] };
     fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), "utf8");
   }
-  return normalizeDb(JSON.parse(fs.readFileSync(DB_PATH, "utf8")));
+  return syncBillStatuses(normalizeDb(JSON.parse(fs.readFileSync(DB_PATH, "utf8"))));
 }
 
 function saveDb(db) {
@@ -265,11 +265,81 @@ function formatCurrency(value) {
   }).format(Number(value) || 0);
 }
 
+function parseTimestamp(value) {
+  const ts = Date.parse(value || "");
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+function compareNewestFirst(a, b) {
+  return parseTimestamp(b.createdAt) - parseTimestamp(a.createdAt);
+}
+
+function compareBillTimeline(a, b) {
+  return parseTimestamp(a.dueDate || a.createdAt) - parseTimestamp(b.dueDate || b.createdAt);
+}
+
+function isValidDateInput(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "").trim()) && Number.isFinite(Date.parse(`${value}T00:00:00Z`));
+}
+
+function normalizeLine(value, maxLength) {
+  return String(value || "").replace(/\s+/g, " ").trim().slice(0, maxLength);
+}
+
+function getBillStatus(bill) {
+  if (!bill) return "unpaid";
+  if (bill.status === "paid") return "paid";
+  if (isValidDateInput(bill.dueDate)) {
+    const dueTs = Date.parse(`${bill.dueDate}T23:59:59Z`);
+    if (dueTs < Date.now()) return "overdue";
+  }
+  return "unpaid";
+}
+
+function getBillStatusTone(status) {
+  if (status === "paid") return "green";
+  if (status === "overdue") return "red";
+  return "blue";
+}
+
+function getPaymentStatusTone(status) {
+  if (status === "approved") return "green";
+  if (status === "rejected") return "red";
+  return "orange";
+}
+
+function getMaintenanceStatusTone(status) {
+  if (status === "resolved") return "green";
+  if (status === "in-progress") return "orange";
+  return "blue";
+}
+
+function getTenantBillOptions(db, tenantId, { includePaid = true } = {}) {
+  return db.bills
+    .filter((bill) => bill.tenantId === tenantId)
+    .filter((bill) => includePaid || getBillStatus(bill) !== "paid")
+    .sort(compareBillTimeline);
+}
+
+function getApprovedPaymentTotal(db, billId) {
+  return db.payments
+    .filter((payment) => payment.billId === billId && payment.status === "approved")
+    .reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
+}
+
+function syncBillStatuses(db) {
+  db.bills.forEach((bill) => {
+    const approvedTotal = getApprovedPaymentTotal(db, bill.id);
+    bill.status = approvedTotal >= (Number(bill.amount) || 0) && Number(bill.amount) > 0 ? "paid" : "unpaid";
+  });
+  return db;
+}
+
 function applySecurityHeaders(res) {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Referrer-Policy", "same-origin");
   res.setHeader("X-Frame-Options", "DENY");
-  res.setHeader("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
+  res.setHeader("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
 }
 
 function checkHealth() {
@@ -552,16 +622,15 @@ function tenantDashboardView(user, db, flash = "") {
   const currentSession = activeSessions.find((session) => session.userId === user.id) || null;
   const joinedDate = formatDateOnly(user.createdAt);
   const lastAccess = currentSession ? formatDateTime(currentSession.createdAt) : "No active session found";
-  const bills = db.bills
-    .filter((bill) => bill.tenantId === user.id)
-    .sort((a, b) => Date.parse(a.dueDate || a.createdAt) - Date.parse(b.dueDate || b.createdAt));
+  const bills = getTenantBillOptions(db, user.id);
   const payments = db.payments
     .filter((payment) => payment.tenantId === user.id)
-    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    .sort(compareNewestFirst);
   const requests = db.maintenanceRequests
     .filter((request) => request.tenantId === user.id)
-    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
-  const totalDue = bills.filter((bill) => bill.status !== "paid").reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
+    .sort(compareNewestFirst);
+  const openBills = bills.filter((bill) => getBillStatus(bill) !== "paid");
+  const totalDue = openBills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
   const totalPaid = payments.filter((payment) => payment.status === "approved").reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
   const recentActivity = [];
   if (currentSession) {
@@ -585,8 +654,8 @@ function tenantDashboardView(user, db, flash = "") {
         title: bills[0].title,
         detail: `Bill added for ${formatCurrency(bills[0].amount)}`,
         time: formatDateTime(bills[0].createdAt),
-        badge: bills[0].status,
-        badgeTone: bills[0].status === "paid" ? "green" : bills[0].status === "overdue" ? "red" : "blue",
+        badge: getBillStatus(bills[0]),
+        badgeTone: getBillStatusTone(getBillStatus(bills[0])),
       })
     );
   }
@@ -598,8 +667,8 @@ function tenantDashboardView(user, db, flash = "") {
         title: bills[1].title,
         detail: `Bill added for ${formatCurrency(bills[1].amount)}`,
         time: formatDateTime(bills[1].createdAt),
-        badge: bills[1].status,
-        badgeTone: bills[1].status === "paid" ? "green" : bills[1].status === "overdue" ? "red" : "blue",
+        badge: getBillStatus(bills[1]),
+        badgeTone: getBillStatusTone(getBillStatus(bills[1])),
       })
     );
   }
@@ -612,7 +681,7 @@ function tenantDashboardView(user, db, flash = "") {
         detail: `${formatCurrency(payments[0].amount)} is ${payments[0].status}`,
         time: formatDateTime(payments[0].createdAt),
         badge: payments[0].status,
-        badgeTone: payments[0].status === "approved" ? "green" : payments[0].status === "rejected" ? "red" : "orange",
+        badgeTone: getPaymentStatusTone(payments[0].status),
       })
     );
   }
@@ -625,7 +694,7 @@ function tenantDashboardView(user, db, flash = "") {
         detail: `${formatCurrency(payments[1].amount)} is ${payments[1].status}`,
         time: formatDateTime(payments[1].createdAt),
         badge: payments[1].status,
-        badgeTone: payments[1].status === "approved" ? "green" : payments[1].status === "rejected" ? "red" : "orange",
+        badgeTone: getPaymentStatusTone(payments[1].status),
       })
     );
   }
@@ -638,7 +707,7 @@ function tenantDashboardView(user, db, flash = "") {
         detail: `Maintenance request is ${requests[0].status}`,
         time: formatDateTime(requests[0].createdAt),
         badge: requests[0].status,
-        badgeTone: requests[0].status === "resolved" ? "green" : requests[0].status === "in-progress" ? "orange" : "blue",
+        badgeTone: getMaintenanceStatusTone(requests[0].status),
       })
     );
   }
@@ -651,7 +720,7 @@ function tenantDashboardView(user, db, flash = "") {
         detail: `Maintenance request is ${requests[1].status}`,
         time: formatDateTime(requests[1].createdAt),
         badge: requests[1].status,
-        badgeTone: requests[1].status === "resolved" ? "green" : requests[1].status === "in-progress" ? "orange" : "blue",
+        badgeTone: getMaintenanceStatusTone(requests[1].status),
       })
     );
   }
@@ -700,7 +769,7 @@ function tenantDashboardView(user, db, flash = "") {
           <div class="stat-card">
             <div class="stat-label">Outstanding Bills</div>
             <div class="stat-value">${formatCurrency(totalDue)}</div>
-            <div class="stat-change">${bills.filter((bill) => bill.status !== "paid").length} unpaid bills</div>
+            <div class="stat-change">${openBills.length} unpaid bills</div>
           </div>
         </div>
 
@@ -775,23 +844,22 @@ function tenantDashboardView(user, db, flash = "") {
 }
 
 function tenantBillsPage(user, db, flash = "") {
-  const bills = db.bills
-    .filter((bill) => bill.tenantId === user.id)
-    .sort((a, b) => Date.parse(a.dueDate || a.createdAt) - Date.parse(b.dueDate || b.createdAt));
+  const bills = getTenantBillOptions(db, user.id);
   const rows = bills.length
     ? bills
         .map(
           (bill) => `<tr>
             <td style="padding:0.9rem 0.75rem;"><strong>${escapeHtml(bill.title)}</strong></td>
             <td style="padding:0.9rem 0.75rem;">${formatCurrency(bill.amount)}</td>
-            <td style="padding:0.9rem 0.75rem;">${escapeHtml(bill.dueDate || "Not set")}</td>
-            <td style="padding:0.9rem 0.75rem; text-transform:capitalize;">${escapeHtml(bill.status)}</td>
+            <td style="padding:0.9rem 0.75rem;">${escapeHtml(isValidDateInput(bill.dueDate) ? formatDateOnly(`${bill.dueDate}T00:00:00Z`) : "Not set")}</td>
+            <td style="padding:0.9rem 0.75rem;"><span class="badge badge-${getBillStatusTone(getBillStatus(bill))}">${escapeHtml(getBillStatus(bill))}</span></td>
           </tr>`
         )
         .join("")
     : `<tr><td colspan="4" style="padding:1rem 0.75rem; color:var(--text-secondary);">No bills have been assigned yet.</td></tr>`;
-  const unpaid = bills.filter((bill) => bill.status !== "paid").reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
-  const active = bills.filter((bill) => bill.status !== "paid").length;
+  const unpaidBills = bills.filter((bill) => getBillStatus(bill) !== "paid");
+  const unpaid = unpaidBills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
+  const active = unpaidBills.length;
 
   return layoutPage({
     title: "My Bills - Godstime Lodge",
@@ -832,24 +900,26 @@ function tenantBillsPage(user, db, flash = "") {
 }
 
 function tenantPaymentsPage(user, db, flash = "") {
-  const bills = db.bills.filter((bill) => bill.tenantId === user.id);
+  const bills = getTenantBillOptions(db, user.id, { includePaid: false });
   const payments = db.payments
     .filter((payment) => payment.tenantId === user.id)
-    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    .sort(compareNewestFirst);
   const options = bills.length
-    ? bills.map((bill) => `<option value="${escapeHtml(bill.id)}">${escapeHtml(bill.title)} - ${formatCurrency(bill.amount)}</option>`).join("")
-    : `<option value="">No bill selected</option>`;
+    ? bills.map((bill) => {
+        const status = getBillStatus(bill);
+        return `<option value="${escapeHtml(bill.id)}">${escapeHtml(bill.title)} - ${formatCurrency(bill.amount)} (${escapeHtml(status)})</option>`;
+      }).join("")
+    : `<option value="">No unpaid bills available</option>`;
   const items = payments.length
-    ? payments.map((payment) => `<div class="activity-item">
-      <div class="activity-icon green">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-      </div>
-      <div class="activity-content">
-        <p class="activity-text"><strong>${formatCurrency(payment.amount)}</strong></p>
-        <p class="activity-text" style="color:var(--text-secondary);">${escapeHtml(payment.note || "No note added")}</p>
-        <span class="activity-time">${escapeHtml(payment.status)} • ${formatDateTime(payment.createdAt)}</span>
-      </div>
-    </div>`).join("")
+    ? payments.map((payment) => renderActivityItem({
+        tone: "green",
+        iconSvg: '<path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+        title: formatCurrency(payment.amount),
+        detail: payment.note || "No note added",
+        time: formatDateTime(payment.createdAt),
+        badge: payment.status,
+        badgeTone: getPaymentStatusTone(payment.status),
+      })).join("")
     : `<div style="padding:1rem; color:var(--text-secondary);">No payments submitted yet.</div>`;
 
   return layoutPage({
@@ -864,10 +934,10 @@ function tenantPaymentsPage(user, db, flash = "") {
         <div class="card">
           <div class="card-header"><div><h3 class="card-title">Submit Payment</h3><p class="card-subtitle">Attach a payment to one of your bills</p></div></div>
           <form method="post" action="/tenant/payments" style="padding:1rem 1.25rem; display:grid; gap:0.85rem;">
-            <div class="form-group"><label class="form-label">Bill</label><select name="bill_id" class="form-input">${options}</select></div>
+            <div class="form-group"><label class="form-label">Bill</label><select name="bill_id" class="form-input" ${bills.length ? "" : "disabled"}>${options}</select></div>
             <div class="form-group"><label class="form-label">Amount</label><input name="amount" type="number" min="0" step="100" class="form-input" placeholder="e.g. 250000" required /></div>
-            <div class="form-group"><label class="form-label">Note</label><input name="note" type="text" class="form-input" placeholder="Transfer reference or note" /></div>
-            <button type="submit" class="btn btn-primary">Submit Payment</button>
+            <div class="form-group"><label class="form-label">Note</label><input name="note" type="text" maxlength="120" class="form-input" placeholder="Transfer reference or note" /></div>
+            <button type="submit" class="btn btn-primary" ${bills.length ? "" : "disabled"}>Submit Payment</button>
           </form>
         </div>
         <div class="card">
@@ -882,18 +952,17 @@ function tenantPaymentsPage(user, db, flash = "") {
 function tenantMaintenancePage(user, db, flash = "") {
   const requests = db.maintenanceRequests
     .filter((request) => request.tenantId === user.id)
-    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    .sort(compareNewestFirst);
   const items = requests.length
-    ? requests.map((request) => `<div class="activity-item">
-      <div class="activity-icon orange">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-      </div>
-      <div class="activity-content">
-        <p class="activity-text"><strong>${escapeHtml(request.title)}</strong></p>
-        <p class="activity-text" style="color:var(--text-secondary);">${escapeHtml(request.description)}</p>
-        <span class="activity-time">${escapeHtml(request.status)} • ${formatDateTime(request.createdAt)}</span>
-      </div>
-    </div>`).join("")
+    ? requests.map((request) => renderActivityItem({
+        tone: "orange",
+        iconSvg: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+        title: request.title,
+        detail: request.description,
+        time: formatDateTime(request.createdAt),
+        badge: request.status,
+        badgeTone: getMaintenanceStatusTone(request.status),
+      })).join("")
     : `<div style="padding:1rem; color:var(--text-secondary);">No maintenance requests yet.</div>`;
 
   return layoutPage({
@@ -908,8 +977,8 @@ function tenantMaintenancePage(user, db, flash = "") {
         <div class="card">
           <div class="card-header"><div><h3 class="card-title">New Request</h3><p class="card-subtitle">Tell management what needs attention</p></div></div>
           <form method="post" action="/tenant/requests" style="padding:1rem 1.25rem; display:grid; gap:0.85rem;">
-            <div class="form-group"><label class="form-label">Title</label><input name="title" type="text" class="form-input" placeholder="e.g. Water leak in bathroom" required /></div>
-            <div class="form-group"><label class="form-label">Description</label><textarea name="description" class="form-input" rows="4" placeholder="Describe the issue" required></textarea></div>
+            <div class="form-group"><label class="form-label">Title</label><input name="title" type="text" maxlength="80" class="form-input" placeholder="e.g. Water leak in bathroom" required /></div>
+            <div class="form-group"><label class="form-label">Description</label><textarea name="description" class="form-input" rows="4" maxlength="400" placeholder="Describe the issue" required></textarea></div>
             <button type="submit" class="btn btn-primary">Send Request</button>
           </form>
         </div>
@@ -962,7 +1031,7 @@ function tenantAccountPage(user, db, flash = "") {
   const payments = db.payments.filter((payment) => payment.tenantId === user.id);
   const requests = db.maintenanceRequests.filter((request) => request.tenantId === user.id);
   const approvedPayments = payments.filter((payment) => payment.status === "approved").reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
-  const openBills = bills.filter((bill) => bill.status !== "paid");
+  const openBills = bills.filter((bill) => getBillStatus(bill) !== "paid");
   const content = `
     ${sectionHeader("My Account", "Review your tenant profile and account activity in one place.", flash)}
     <div class="stats-grid">
@@ -1033,29 +1102,31 @@ function tenantAccountPage(user, db, flash = "") {
 }
 
 function tenantAnalyticsPage(user, db, flash = "") {
-  const bills = db.bills
+  const bills = [...db.bills]
     .filter((bill) => bill.tenantId === user.id)
-    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    .sort(compareNewestFirst);
   const payments = db.payments
     .filter((payment) => payment.tenantId === user.id)
-    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    .sort(compareNewestFirst);
   const requests = db.maintenanceRequests
     .filter((request) => request.tenantId === user.id)
-    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
-  const totalDue = bills.filter((bill) => bill.status !== "paid").reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
+    .sort(compareNewestFirst);
+  const paidBills = bills.filter((bill) => getBillStatus(bill) === "paid").length;
+  const unpaidBills = bills.filter((bill) => getBillStatus(bill) !== "paid");
+  const totalDue = unpaidBills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
   const approvedPayments = payments.filter((payment) => payment.status === "approved");
   const openRequests = requests.filter((request) => request.status !== "resolved");
-  const paidBills = bills.filter((bill) => bill.status === "paid").length;
   const recentActivity = [];
   if (bills[0]) {
+    const billStatus = getBillStatus(bills[0]);
     recentActivity.push(renderActivityItem({
       tone: "blue",
       iconSvg: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="13" y2="15"/>',
       title: bills[0].title,
-      detail: `${formatCurrency(bills[0].amount)} • ${bills[0].status}`,
+      detail: `${formatCurrency(bills[0].amount)} • ${billStatus}`,
       time: formatDateTime(bills[0].createdAt),
-      badge: bills[0].status,
-      badgeTone: bills[0].status === "paid" ? "green" : bills[0].status === "overdue" ? "red" : "blue",
+      badge: billStatus,
+      badgeTone: getBillStatusTone(billStatus),
     }));
   }
   if (payments[0]) {
@@ -1066,7 +1137,7 @@ function tenantAnalyticsPage(user, db, flash = "") {
       detail: `${formatCurrency(payments[0].amount)} • ${payments[0].status}`,
       time: formatDateTime(payments[0].createdAt),
       badge: payments[0].status,
-      badgeTone: payments[0].status === "approved" ? "green" : payments[0].status === "rejected" ? "red" : "orange",
+      badgeTone: getPaymentStatusTone(payments[0].status),
     }));
   }
   if (requests[0]) {
@@ -1077,7 +1148,7 @@ function tenantAnalyticsPage(user, db, flash = "") {
       detail: `Maintenance is ${requests[0].status}`,
       time: formatDateTime(requests[0].createdAt),
       badge: requests[0].status,
-      badgeTone: requests[0].status === "resolved" ? "green" : requests[0].status === "in-progress" ? "orange" : "blue",
+      badgeTone: getMaintenanceStatusTone(requests[0].status),
     }));
   }
 
@@ -1090,7 +1161,7 @@ function tenantAnalyticsPage(user, db, flash = "") {
     body: `<main class="main-content">
       ${sectionHeader("Analytics", "Track your bills, payments, and maintenance in one place.", flash)}
       <div class="stats-grid">
-        <div class="stat-card"><div class="stat-label">Bills</div><div class="stat-value">${bills.length}</div><div class="stat-change positive">${paidBills} paid, ${bills.length - paidBills} unpaid</div></div>
+        <div class="stat-card"><div class="stat-label">Bills</div><div class="stat-value">${bills.length}</div><div class="stat-change positive">${paidBills} paid, ${unpaidBills.length} unpaid</div></div>
         <div class="stat-card"><div class="stat-label">Payments</div><div class="stat-value">${payments.length}</div><div class="stat-change positive">${approvedPayments.length} approved</div></div>
         <div class="stat-card"><div class="stat-label">Open Requests</div><div class="stat-value">${openRequests.length}</div><div class="stat-change positive">${requests.length} total maintenance tickets</div></div>
         <div class="stat-card"><div class="stat-label">Outstanding</div><div class="stat-value">${formatCurrency(totalDue)}</div><div class="stat-change positive">Remaining balance</div></div>
@@ -1145,15 +1216,18 @@ function tenantAnalyticsPage(user, db, flash = "") {
                 bills.length
                   ? bills
                       .slice(0, 5)
-                      .map((bill) => renderActivityItem({
-                        tone: bill.status === "paid" ? "green" : "blue",
+                      .map((bill) => {
+                        const billStatus = getBillStatus(bill);
+                        return renderActivityItem({
+                        tone: billStatus === "paid" ? "green" : "blue",
                         iconSvg: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="13" y2="15"/>',
                         title: bill.title,
-                        detail: `${formatCurrency(bill.amount)} • ${escapeHtml(bill.status)}`,
+                        detail: `${formatCurrency(bill.amount)} • ${escapeHtml(billStatus)}`,
                         time: formatDateTime(bill.createdAt),
-                        badge: bill.status,
-                        badgeTone: bill.status === "paid" ? "green" : bill.status === "overdue" ? "red" : "blue",
-                      }))
+                        badge: billStatus,
+                        badgeTone: getBillStatusTone(billStatus),
+                      });
+                    })
                       .join("")
                   : `<div style="padding:1rem; color:var(--text-secondary);">Bills will appear here once management creates them.</div>`
               }</div>
@@ -1212,16 +1286,17 @@ function adminDashboardView(user, db, flash = "") {
   const totalUnits = 25;
   const tenants = db.users
     .filter((item) => item.role === "tenant")
-    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    .sort(compareNewestFirst);
   const activeSessions = db.sessions
     .filter((session) => Date.parse(session.expiresAt) > Date.now())
-    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    .sort(compareNewestFirst);
   const occupiedUnits = new Set(tenants.map((tenant) => tenant.unit).filter(Boolean)).size;
   const occupancyRate = percentage(occupiedUnits, totalUnits);
-  const bills = db.bills.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
-  const payments = db.payments.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
-  const maintenanceRequests = db.maintenanceRequests.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
-  const totalOutstanding = bills.filter((bill) => bill.status !== "paid").reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
+  const bills = [...db.bills].sort(compareNewestFirst);
+  const payments = [...db.payments].sort(compareNewestFirst);
+  const maintenanceRequests = [...db.maintenanceRequests].sort(compareNewestFirst);
+  const openBills = bills.filter((bill) => getBillStatus(bill) !== "paid");
+  const totalOutstanding = openBills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
   const approvedPayments = payments.filter((payment) => payment.status === "approved").reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
   const recentActivity = [];
   if (tenants[0]) {
@@ -1259,8 +1334,8 @@ function adminDashboardView(user, db, flash = "") {
         title: bills[0].title,
         detail: `${formatCurrency(bills[0].amount)} for ${tenant ? tenant.fullName || tenant.email : "Unknown tenant"}`,
         time: formatDateTime(bills[0].createdAt),
-        badge: bills[0].status,
-        badgeTone: bills[0].status === "paid" ? "green" : bills[0].status === "overdue" ? "red" : "blue",
+        badge: getBillStatus(bills[0]),
+        badgeTone: getBillStatusTone(getBillStatus(bills[0])),
       })
     );
   }
@@ -1273,8 +1348,8 @@ function adminDashboardView(user, db, flash = "") {
         title: bills[1].title,
         detail: `${formatCurrency(bills[1].amount)} for ${tenant ? tenant.fullName || tenant.email : "Unknown tenant"}`,
         time: formatDateTime(bills[1].createdAt),
-        badge: bills[1].status,
-        badgeTone: bills[1].status === "paid" ? "green" : bills[1].status === "overdue" ? "red" : "blue",
+        badge: getBillStatus(bills[1]),
+        badgeTone: getBillStatusTone(getBillStatus(bills[1])),
       })
     );
   }
@@ -1288,7 +1363,7 @@ function adminDashboardView(user, db, flash = "") {
         detail: `${formatCurrency(payments[0].amount)} is ${payments[0].status}`,
         time: formatDateTime(payments[0].createdAt),
         badge: payments[0].status,
-        badgeTone: payments[0].status === "approved" ? "green" : payments[0].status === "rejected" ? "red" : "orange",
+        badgeTone: getPaymentStatusTone(payments[0].status),
       })
     );
   }
@@ -1302,7 +1377,7 @@ function adminDashboardView(user, db, flash = "") {
         detail: `${formatCurrency(payments[1].amount)} is ${payments[1].status}`,
         time: formatDateTime(payments[1].createdAt),
         badge: payments[1].status,
-        badgeTone: payments[1].status === "approved" ? "green" : payments[1].status === "rejected" ? "red" : "orange",
+        badgeTone: getPaymentStatusTone(payments[1].status),
       })
     );
   }
@@ -1316,7 +1391,7 @@ function adminDashboardView(user, db, flash = "") {
         detail: `From ${tenant ? tenant.fullName || tenant.email : "Unknown tenant"} • ${maintenanceRequests[0].status}`,
         time: formatDateTime(maintenanceRequests[0].createdAt),
         badge: maintenanceRequests[0].status,
-        badgeTone: maintenanceRequests[0].status === "resolved" ? "green" : maintenanceRequests[0].status === "in-progress" ? "orange" : "blue",
+        badgeTone: getMaintenanceStatusTone(maintenanceRequests[0].status),
       })
     );
   }
@@ -1330,7 +1405,7 @@ function adminDashboardView(user, db, flash = "") {
         detail: `From ${tenant ? tenant.fullName || tenant.email : "Unknown tenant"} • ${maintenanceRequests[1].status}`,
         time: formatDateTime(maintenanceRequests[1].createdAt),
         badge: maintenanceRequests[1].status,
-        badgeTone: maintenanceRequests[1].status === "resolved" ? "green" : maintenanceRequests[1].status === "in-progress" ? "orange" : "blue",
+        badgeTone: getMaintenanceStatusTone(maintenanceRequests[1].status),
       })
     );
   }
@@ -1399,10 +1474,10 @@ function adminDashboardView(user, db, flash = "") {
             <div class="stat-value">${occupiedUnits}</div>
             <div class="stat-change positive">${occupancyRate}% of ${totalUnits} units are assigned</div>
           </div>
-          <div class="stat-card">
-            <div class="stat-label">Outstanding Bills</div>
-            <div class="stat-value">${formatCurrency(totalOutstanding)}</div>
-            <div class="stat-change positive">${bills.filter((bill) => bill.status !== "paid").length} unpaid bills</div>
+            <div class="stat-card">
+              <div class="stat-label">Outstanding Bills</div>
+              <div class="stat-value">${formatCurrency(totalOutstanding)}</div>
+            <div class="stat-change positive">${openBills.length} unpaid bills</div>
           </div>
           <div class="stat-card">
             <div class="stat-label">Approved Payments</div>
@@ -1436,9 +1511,9 @@ function adminDashboardView(user, db, flash = "") {
             <div>
               <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
                 <span>Open items</span>
-                <strong>${bills.filter((bill) => bill.status !== "paid").length + maintenanceRequests.filter((request) => request.status !== "resolved").length}</strong>
+                <strong>${openBills.length + maintenanceRequests.filter((request) => request.status !== "resolved").length}</strong>
               </div>
-              <div class="progress-bar"><div class="progress-fill warning" style="width: ${Math.min(100, (bills.filter((bill) => bill.status !== "paid").length + maintenanceRequests.filter((request) => request.status !== "resolved").length) * 10)}%;"></div></div>
+              <div class="progress-bar"><div class="progress-fill warning" style="width: ${Math.min(100, (openBills.length + maintenanceRequests.filter((request) => request.status !== "resolved").length) * 10)}%;"></div></div>
             </div>
           </div>
         </div>
@@ -1466,16 +1541,16 @@ function adminAnalyticsPage(user, db, flash = "") {
   const totalUnits = 25;
   const tenants = db.users
     .filter((item) => item.role === "tenant")
-    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    .sort(compareNewestFirst);
   const activeSessions = db.sessions
     .filter((session) => Date.parse(session.expiresAt) > Date.now())
-    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    .sort(compareNewestFirst);
   const occupiedUnits = new Set(tenants.map((tenant) => tenant.unit).filter(Boolean)).size;
   const occupancyRate = percentage(occupiedUnits, totalUnits);
-  const bills = db.bills.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
-  const payments = db.payments.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
-  const requests = db.maintenanceRequests.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
-  const outstandingBills = bills.filter((bill) => bill.status !== "paid");
+  const bills = [...db.bills].sort(compareNewestFirst);
+  const payments = [...db.payments].sort(compareNewestFirst);
+  const requests = [...db.maintenanceRequests].sort(compareNewestFirst);
+  const outstandingBills = bills.filter((bill) => getBillStatus(bill) !== "paid");
   const approvedPayments = payments.filter((payment) => payment.status === "approved");
   const pendingPayments = payments.filter((payment) => payment.status === "pending");
   const openRequests = requests.filter((request) => request.status !== "resolved");
@@ -1511,8 +1586,8 @@ function adminAnalyticsPage(user, db, flash = "") {
       title: bills[0].title,
       detail: `${formatCurrency(bills[0].amount)} for ${tenant ? tenant.fullName || tenant.email : "Unknown tenant"}`,
       time: formatDateTime(bills[0].createdAt),
-      badge: bills[0].status,
-      badgeTone: bills[0].status === "paid" ? "green" : bills[0].status === "overdue" ? "red" : "blue",
+      badge: getBillStatus(bills[0]),
+      badgeTone: getBillStatusTone(getBillStatus(bills[0])),
     }));
   }
   if (bills[1]) {
@@ -1523,8 +1598,8 @@ function adminAnalyticsPage(user, db, flash = "") {
       title: bills[1].title,
       detail: `${formatCurrency(bills[1].amount)} for ${tenant ? tenant.fullName || tenant.email : "Unknown tenant"}`,
       time: formatDateTime(bills[1].createdAt),
-      badge: bills[1].status,
-      badgeTone: bills[1].status === "paid" ? "green" : bills[1].status === "overdue" ? "red" : "blue",
+      badge: getBillStatus(bills[1]),
+      badgeTone: getBillStatusTone(getBillStatus(bills[1])),
     }));
   }
   if (payments[0]) {
@@ -1536,7 +1611,7 @@ function adminAnalyticsPage(user, db, flash = "") {
       detail: `${formatCurrency(payments[0].amount)} • ${payments[0].status}`,
       time: formatDateTime(payments[0].createdAt),
       badge: payments[0].status,
-      badgeTone: payments[0].status === "approved" ? "green" : payments[0].status === "rejected" ? "red" : "orange",
+      badgeTone: getPaymentStatusTone(payments[0].status),
     }));
   }
   if (payments[1]) {
@@ -1548,7 +1623,7 @@ function adminAnalyticsPage(user, db, flash = "") {
       detail: `${formatCurrency(payments[1].amount)} • ${payments[1].status}`,
       time: formatDateTime(payments[1].createdAt),
       badge: payments[1].status,
-      badgeTone: payments[1].status === "approved" ? "green" : payments[1].status === "rejected" ? "red" : "orange",
+      badgeTone: getPaymentStatusTone(payments[1].status),
     }));
   }
   if (requests[0]) {
@@ -1560,7 +1635,7 @@ function adminAnalyticsPage(user, db, flash = "") {
       detail: `From ${tenant ? tenant.fullName || tenant.email : "Unknown tenant"} • ${requests[0].status}`,
       time: formatDateTime(requests[0].createdAt),
       badge: requests[0].status,
-      badgeTone: requests[0].status === "resolved" ? "green" : requests[0].status === "in-progress" ? "orange" : "blue",
+      badgeTone: getMaintenanceStatusTone(requests[0].status),
     }));
   }
   if (requests[1]) {
@@ -1572,7 +1647,7 @@ function adminAnalyticsPage(user, db, flash = "") {
       detail: `From ${tenant ? tenant.fullName || tenant.email : "Unknown tenant"} • ${requests[1].status}`,
       time: formatDateTime(requests[1].createdAt),
       badge: requests[1].status,
-      badgeTone: requests[1].status === "resolved" ? "green" : requests[1].status === "in-progress" ? "orange" : "blue",
+      badgeTone: getMaintenanceStatusTone(requests[1].status),
     }));
   }
   if (activeSessions[0]) {
@@ -1637,8 +1712,8 @@ function adminAnalyticsPage(user, db, flash = "") {
           </div>
           <div style="padding: 1rem 1.25rem; display:grid; gap:1rem;">
             <div>
-              <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;"><span>Paid bills</span><strong>${bills.filter((bill) => bill.status === "paid").length}</strong></div>
-              <div class="progress-bar"><div class="progress-fill success" style="width: ${percentage(bills.filter((bill) => bill.status === "paid").length, bills.length || 1)}%;"></div></div>
+              <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;"><span>Paid bills</span><strong>${bills.filter((bill) => getBillStatus(bill) === "paid").length}</strong></div>
+              <div class="progress-bar"><div class="progress-fill success" style="width: ${percentage(bills.filter((bill) => getBillStatus(bill) === "paid").length, bills.length || 1)}%;"></div></div>
             </div>
             <div>
               <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;"><span>Approved payments</span><strong>${approvedPayments.length}</strong></div>
@@ -1693,7 +1768,7 @@ function adminAnalyticsPage(user, db, flash = "") {
 
 function adminBillsPage(user, db, flash = "") {
   const tenants = db.users.filter((item) => item.role === "tenant");
-  const bills = db.bills.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const bills = [...db.bills].sort(compareNewestFirst);
   const billTenantOptions = tenants.length
     ? tenants
         .map((tenant) => `<option value="${escapeHtml(tenant.id)}">${escapeHtml((tenant.fullName || tenant.email) + (tenant.unit ? ` - ${tenant.unit}` : ""))}</option>`)
@@ -1707,8 +1782,8 @@ function adminBillsPage(user, db, flash = "") {
             <td style="padding:0.9rem 0.75rem;"><strong>${escapeHtml(bill.title)}</strong></td>
             <td style="padding:0.9rem 0.75rem;">${escapeHtml(tenant ? tenant.fullName || tenant.email : "Unknown tenant")}</td>
             <td style="padding:0.9rem 0.75rem;">${formatCurrency(bill.amount)}</td>
-            <td style="padding:0.9rem 0.75rem;">${escapeHtml(bill.dueDate || "Not set")}</td>
-            <td style="padding:0.9rem 0.75rem; text-transform:capitalize;">${escapeHtml(bill.status)}</td>
+            <td style="padding:0.9rem 0.75rem;">${escapeHtml(isValidDateInput(bill.dueDate) ? formatDateOnly(`${bill.dueDate}T00:00:00Z`) : "Not set")}</td>
+            <td style="padding:0.9rem 0.75rem;"><span class="badge badge-${getBillStatusTone(getBillStatus(bill))}">${escapeHtml(getBillStatus(bill))}</span></td>
           </tr>`;
         })
         .join("")
@@ -1727,7 +1802,7 @@ function adminBillsPage(user, db, flash = "") {
           <div class="card-header"><div><h3 class="card-title">Create Bill</h3><p class="card-subtitle">Assign a charge to a tenant</p></div></div>
           <form method="post" action="/admin/bills" style="padding:1rem 1.25rem; display:grid; gap:0.85rem;">
             <div class="form-group"><label class="form-label">Tenant</label><select name="tenant_id" class="form-input">${billTenantOptions}</select></div>
-            <div class="form-group"><label class="form-label">Bill Title</label><input name="title" type="text" class="form-input" placeholder="e.g. April Rent" required /></div>
+            <div class="form-group"><label class="form-label">Bill Title</label><input name="title" type="text" maxlength="80" class="form-input" placeholder="e.g. April Rent" required /></div>
             <div class="form-group"><label class="form-label">Amount</label><input name="amount" type="number" min="0" step="100" class="form-input" placeholder="e.g. 250000" required /></div>
             <div class="form-group"><label class="form-label">Due Date</label><input name="due_date" type="date" class="form-input" required /></div>
             <button type="submit" class="btn btn-primary">Create Bill</button>
@@ -1737,7 +1812,7 @@ function adminBillsPage(user, db, flash = "") {
           <div class="card-header"><div><h3 class="card-title">Bill Stats</h3><p class="card-subtitle">Quick overview</p></div></div>
           <div style="padding:1rem 1.25rem; display:grid; gap:1rem;">
             <div><strong>Total Bills:</strong> ${bills.length}</div>
-            <div><strong>Unpaid Bills:</strong> ${bills.filter((bill) => bill.status !== "paid").length}</div>
+            <div><strong>Unpaid Bills:</strong> ${bills.filter((bill) => getBillStatus(bill) !== "paid").length}</div>
             <div><strong>Total Value:</strong> ${formatCurrency(bills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0))}</div>
           </div>
         </div>
@@ -1766,22 +1841,23 @@ function adminBillsPage(user, db, flash = "") {
 }
 
 function adminPaymentsPage(user, db, flash = "") {
-  const payments = db.payments.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const payments = [...db.payments].sort(compareNewestFirst);
   const rows = payments.length
     ? payments
         .map((payment) => {
           const tenant = db.users.find((item) => item.id === payment.tenantId);
           const bill = db.bills.find((item) => item.id === payment.billId);
+          const isPending = payment.status === "pending";
           return `<tr>
             <td style="padding:0.9rem 0.75rem;"><strong>${escapeHtml(tenant ? tenant.fullName || tenant.email : "Unknown tenant")}</strong></td>
             <td style="padding:0.9rem 0.75rem;">${escapeHtml(bill ? bill.title : "No bill linked")}</td>
             <td style="padding:0.9rem 0.75rem;">${formatCurrency(payment.amount)}</td>
-            <td style="padding:0.9rem 0.75rem; text-transform:capitalize;">${escapeHtml(payment.status)}</td>
+            <td style="padding:0.9rem 0.75rem;"><span class="badge badge-${getPaymentStatusTone(payment.status)}">${escapeHtml(payment.status)}</span></td>
             <td style="padding:0.9rem 0.75rem;">
               <form method="post" action="/admin/payments/status" style="display:flex; gap:0.5rem; flex-wrap:wrap;">
                 <input type="hidden" name="payment_id" value="${escapeHtml(payment.id)}" />
-                <button class="btn btn-primary" type="submit" name="status" value="approved">Approve</button>
-                <button class="btn btn-secondary" type="submit" name="status" value="rejected">Reject</button>
+                <button class="btn btn-primary" type="submit" name="status" value="approved" ${isPending ? "" : "disabled"}>Approve</button>
+                <button class="btn btn-secondary" type="submit" name="status" value="rejected" ${isPending ? "" : "disabled"}>Reject</button>
               </form>
             </td>
           </tr>`;
@@ -1827,21 +1903,22 @@ function adminPaymentsPage(user, db, flash = "") {
 }
 
 function adminMaintenancePage(user, db, flash = "") {
-  const requests = db.maintenanceRequests.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const requests = [...db.maintenanceRequests].sort(compareNewestFirst);
   const rows = requests.length
     ? requests
         .map((request) => {
           const tenant = db.users.find((item) => item.id === request.tenantId);
+          const isResolved = request.status === "resolved";
           return `<tr>
             <td style="padding:0.9rem 0.75rem;"><strong>${escapeHtml(tenant ? tenant.fullName || tenant.email : "Unknown tenant")}</strong></td>
             <td style="padding:0.9rem 0.75rem;">${escapeHtml(request.title)}</td>
             <td style="padding:0.9rem 0.75rem;">${escapeHtml(request.description)}</td>
-            <td style="padding:0.9rem 0.75rem; text-transform:capitalize;">${escapeHtml(request.status)}</td>
+            <td style="padding:0.9rem 0.75rem;"><span class="badge badge-${getMaintenanceStatusTone(request.status)}">${escapeHtml(request.status)}</span></td>
             <td style="padding:0.9rem 0.75rem;">
               <form method="post" action="/admin/maintenance/status" style="display:flex; gap:0.5rem; flex-wrap:wrap;">
                 <input type="hidden" name="request_id" value="${escapeHtml(request.id)}" />
-                <button class="btn btn-primary" type="submit" name="status" value="in-progress">In Progress</button>
-                <button class="btn btn-secondary" type="submit" name="status" value="resolved">Resolve</button>
+                <button class="btn btn-primary" type="submit" name="status" value="in-progress" ${isResolved ? "disabled" : ""}>In Progress</button>
+                <button class="btn btn-secondary" type="submit" name="status" value="resolved" ${isResolved ? "disabled" : ""}>Resolve</button>
               </form>
             </td>
           </tr>`;
@@ -2047,9 +2124,17 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const form = parseForm(body);
       const amount = Number(form.amount || 0);
+      const billId = normalizeLine(form.bill_id, 40);
+      const note = normalizeLine(form.note, 120);
       if (amount <= 0) return redirectWithMessage(res, "/tenant/payments", "Enter a valid payment amount.");
       const db = loadDb();
-      db.payments.push(createPayment({ tenantId: user.id, billId: form.bill_id, amount, note: form.note }));
+      const bill = db.bills.find((item) => item.id === billId && item.tenantId === user.id);
+      if (!bill) return redirectWithMessage(res, "/tenant/payments", "Choose a valid bill before submitting payment.");
+      if (getBillStatus(bill) === "paid") {
+        return redirectWithMessage(res, "/tenant/payments", "That bill is already marked as paid.");
+      }
+      db.payments.push(createPayment({ tenantId: user.id, billId, amount, note }));
+      syncBillStatuses(db);
       saveDb(db);
       return redirectWithMessage(res, "/tenant/payments", "Payment submitted successfully.");
     }
@@ -2065,11 +2150,13 @@ const server = http.createServer(async (req, res) => {
       if (!isFormRequest(req)) return redirectWithMessage(res, "/tenant/requests", "Unsupported request submission.");
       const body = await readBody(req);
       const form = parseForm(body);
-      if (!String(form.title || "").trim() || !String(form.description || "").trim()) {
+      const title = normalizeLine(form.title, 80);
+      const description = normalizeLine(form.description, 400);
+      if (!title || !description) {
         return redirectWithMessage(res, "/tenant/requests", "Please add a title and description for the maintenance request.");
       }
       const db = loadDb();
-      db.maintenanceRequests.push(createMaintenanceRequest({ tenantId: user.id, title: form.title, description: form.description }));
+      db.maintenanceRequests.push(createMaintenanceRequest({ tenantId: user.id, title, description }));
       saveDb(db);
       return redirectWithMessage(res, "/tenant/requests", "Maintenance request sent.");
     }
@@ -2107,16 +2194,17 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const form = parseForm(body);
       const amount = Number(form.amount || 0);
-      const tenantId = String(form.tenant_id || "");
-      const title = String(form.title || "").trim();
-      const dueDate = String(form.due_date || "").trim();
+      const tenantId = normalizeLine(form.tenant_id, 40);
+      const title = normalizeLine(form.title, 80);
+      const dueDate = normalizeLine(form.due_date, 10);
       if (!db.users.some((item) => item.id === tenantId && item.role === "tenant")) {
         return redirectWithMessage(res, "/admin/bills", "Select a valid tenant before creating a bill.");
       }
-      if (!title || amount <= 0 || !dueDate) {
+      if (!title || amount <= 0 || !isValidDateInput(dueDate)) {
         return redirectWithMessage(res, "/admin/bills", "Please fill all bill fields correctly.");
       }
       db.bills.push(createBill({ tenantId, title, amount, dueDate }));
+      syncBillStatuses(db);
       saveDb(db);
       return redirectWithMessage(res, "/admin/bills", "Bill created successfully.");
     }
@@ -2139,17 +2227,17 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const form = parseForm(body);
       const db = loadDb();
-      const payment = db.payments.find((item) => item.id === String(form.payment_id || ""));
+      const payment = db.payments.find((item) => item.id === normalizeLine(form.payment_id, 40));
       if (!payment) return redirectWithMessage(res, "/admin/payments", "Payment not found.");
+      if (payment.status !== "pending") {
+        return redirectWithMessage(res, "/admin/payments", "Only pending payments can be reviewed.");
+      }
       const nextStatus = String(form.status || "").trim();
       if (!["approved", "rejected"].includes(nextStatus)) {
         return redirectWithMessage(res, "/admin/payments", "Choose a valid payment status.");
       }
       payment.status = nextStatus;
-      if (nextStatus === "approved") {
-        const bill = db.bills.find((item) => item.id === payment.billId);
-        if (bill) bill.status = "paid";
-      }
+      syncBillStatuses(db);
       saveDb(db);
       return redirectWithMessage(res, "/admin/payments", "Payment status updated.");
     }
@@ -2172,7 +2260,7 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const form = parseForm(body);
       const db = loadDb();
-      const request = db.maintenanceRequests.find((item) => item.id === String(form.request_id || ""));
+      const request = db.maintenanceRequests.find((item) => item.id === normalizeLine(form.request_id, 40));
       if (!request) return redirectWithMessage(res, "/admin/maintenance", "Request not found.");
       const nextStatus = String(form.status || "").trim();
       if (!["open", "in-progress", "resolved"].includes(nextStatus)) {
