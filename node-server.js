@@ -651,20 +651,6 @@ function tenantDashboardView(user, db, flash = "") {
           </div>
         </div>
 
-        <div class="card" style="margin-top: 1.5rem;">
-          <div class="card-header">
-            <div>
-              <h3 class="card-title">Open Pages</h3>
-              <p class="card-subtitle">Jump straight to the page you need</p>
-            </div>
-          </div>
-          <div style="padding: 1rem 1.25rem; display:flex; gap:0.75rem; flex-wrap:wrap;">
-            <a class="btn btn-secondary" href="/tenant/bills">Bills</a>
-            <a class="btn btn-secondary" href="/tenant/payments">Payments</a>
-            <a class="btn btn-secondary" href="/tenant/requests">Maintenance</a>
-          </div>
-        </div>
-
         <div class="two-col">
           <div class="card">
             <div class="card-header">
@@ -1288,20 +1274,6 @@ function adminDashboardView(user, db, flash = "") {
             <div class="stat-label">Approved Payments</div>
             <div class="stat-value">${formatCurrency(approvedPayments)}</div>
             <div class="stat-change">${payments.length} payment records submitted</div>
-          </div>
-        </div>
-
-        <div class="card" style="margin-top: 1.5rem;">
-          <div class="card-header">
-            <div>
-              <h3 class="card-title">Open Pages</h3>
-              <p class="card-subtitle">Go directly to the management screen you need</p>
-            </div>
-          </div>
-          <div style="padding: 1rem 1.25rem; display:flex; gap:0.75rem; flex-wrap:wrap;">
-            <a class="btn btn-secondary" href="/admin/bills">Bills</a>
-            <a class="btn btn-secondary" href="/admin/payments">Payments</a>
-            <a class="btn btn-secondary" href="/admin/maintenance">Maintenance</a>
           </div>
         </div>
 
