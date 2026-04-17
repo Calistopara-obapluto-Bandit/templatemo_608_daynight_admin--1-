@@ -242,7 +242,7 @@ function loginView(error = "") {
     ? `<div class="alert alert-error" style="margin-bottom:1rem;">${escapeHtml(error)}</div>`
     : "";
   return htmlPage(
-    "Login - God's Time Lodge",
+    "Login - Godstime Lodge",
     `<div class="login-page">
       <div class="login-container">
         <div class="login-card">
@@ -250,7 +250,7 @@ function loginView(error = "") {
             <div class="login-logo">
               <div class="logo-icon logo-mark">GT</div>
               <div class="logo-text">
-                <div class="logo-name">God's Time Lodge</div>
+                <div class="logo-name">Godstime Lodge</div>
                 <div class="logo-sub">Tenant Billing</div>
               </div>
             </div>
@@ -281,7 +281,7 @@ function registerView(error = "") {
     ? `<div class="alert alert-error" style="margin-bottom:1rem;">${escapeHtml(error)}</div>`
     : "";
   return htmlPage(
-    "Create Tenant Account - God's Time Lodge",
+    "Create Tenant Account - Godstime Lodge",
     `<div class="login-page">
       <div class="login-container">
         <div class="login-card">
@@ -289,7 +289,7 @@ function registerView(error = "") {
             <div class="login-logo">
               <div class="logo-icon logo-mark">GT</div>
               <div class="logo-text">
-                <div class="logo-name">God's Time Lodge</div>
+                <div class="logo-name">Godstime Lodge</div>
                 <div class="logo-sub">Tenant Billing</div>
               </div>
             </div>
@@ -325,13 +325,13 @@ function registerView(error = "") {
 
 function tenantDashboardView(user) {
   return htmlPage(
-    "Tenant Dashboard - God's Time Lodge",
+    "Tenant Dashboard - Godstime Lodge",
     `<div class="app-container">
       <nav class="top-nav">
         <div class="nav-container">
           <div class="nav-left">
             <a href="/tenant/dashboard" class="logo">
-              <div class="logo-icon logo-mark">GT</div><div class="logo-text"><div class="logo-name">God's Time Lodge</div><div class="logo-sub">Tenant Billing</div></div>
+              <div class="logo-icon logo-mark">GT</div><div class="logo-text"><div class="logo-name">Godstime Lodge</div><div class="logo-sub">Tenant Billing</div></div>
             </a>
             <div class="nav-menu">
               <div class="nav-item">

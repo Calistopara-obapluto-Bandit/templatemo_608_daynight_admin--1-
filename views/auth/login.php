@@ -6,7 +6,7 @@ declare(strict_types=1);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - God's Time Lodge</title>
+    <title>Login - Godstime Lodge</title>
     <link rel="stylesheet" href="/assets/sbiam-style.css">
 </head>
 <body>
@@ -17,7 +17,7 @@ declare(strict_types=1);
                     <div class="login-logo">
                         <div class="logo-icon logo-mark">GT</div>
                         <div class="logo-text">
-                            <div class="logo-name">God's Time Lodge</div>
+                            <div class="logo-name">Godstime Lodge</div>
                             <div class="logo-sub">Tenant Billing</div>
                         </div>
                     </div>
@@ -55,4 +55,3 @@ declare(strict_types=1);
     </div>
 </body>
 </html>
-

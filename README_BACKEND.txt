@@ -1,4 +1,4 @@
-Backend Setup (God's Time Lodge)
+Backend Setup (Godstime Lodge)
 ===============================
 
 This folder now contains a small PHP + SQLite backend so tenants can register/login

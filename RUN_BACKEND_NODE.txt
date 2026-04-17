@@ -15,4 +15,3 @@ Routes:
 
 Default admin (auto-created in data/node-db.json):
   admin@godstimelodge.com / admin123
-

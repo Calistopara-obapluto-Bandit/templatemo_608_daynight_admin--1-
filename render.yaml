@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: gods-time-lodge
+    name: godstime-lodge
     runtime: node
     plan: starter
     buildCommand: npm install

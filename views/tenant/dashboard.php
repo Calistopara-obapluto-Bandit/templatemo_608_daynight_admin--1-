@@ -22,7 +22,7 @@ function badge_class(string $status): string
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tenant Dashboard - God's Time Lodge</title>
+    <title>Tenant Dashboard - Godstime Lodge</title>
     <script>if(localStorage.getItem("gods-time-logde-theme")==="carbon"){document.documentElement.classList.add("carbon");}</script>
     <link rel="stylesheet" href="/assets/sbiam-style.css">
 </head>
@@ -32,7 +32,7 @@ function badge_class(string $status): string
             <div class="nav-container">
                 <div class="nav-left">
                     <a href="/tenant/dashboard" class="logo">
-                        <div class="logo-icon logo-mark">GT</div><div class="logo-text"><div class="logo-name">God's Time Lodge</div><div class="logo-sub">Tenant Billing</div></div>
+                        <div class="logo-icon logo-mark">GT</div><div class="logo-text"><div class="logo-name">Godstime Lodge</div><div class="logo-sub">Tenant Billing</div></div>
                     </a>
                     <div class="nav-menu">
                         <div class="nav-item">
@@ -194,4 +194,3 @@ function badge_class(string $status): string
     <script src="/assets/sbiam-script.js"></script>
 </body>
 </html>
-
