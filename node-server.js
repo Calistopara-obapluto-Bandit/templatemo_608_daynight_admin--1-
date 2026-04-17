@@ -305,6 +305,68 @@ function htmlPage(title, inner) {
 </html>`;
 }
 
+function layoutPage({ title, activePath, user, roleLabel, navLinks, body, showThemeToggle = true }) {
+  const avatar = escapeHtml((user.fullName || "A").slice(0, 1).toUpperCase());
+  const name = escapeHtml(user.fullName || "User");
+  const links = navLinks
+    .map(
+      (item) => `<div class="nav-item">
+        <a href="${item.href}" class="nav-link${activePath === item.href ? " active" : ""}">
+          ${item.icon}
+          ${escapeHtml(item.label)}
+        </a>
+      </div>`
+    )
+    .join("");
+  const themeToggle = showThemeToggle
+    ? `<div class="theme-toggle">
+        <button class="theme-btn theme-btn-snow active" onclick="setTheme('snow')" title="Snow Edition">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        </button>
+        <button class="theme-btn theme-btn-carbon" onclick="setTheme('carbon')" title="Carbon Edition">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
+      </div>`
+    : "";
+
+  return htmlPage(
+    title,
+    `<div class="app-container">
+      <nav class="top-nav">
+        <div class="nav-container">
+          <div class="nav-left">
+            <a href="/${user.role === "admin" ? "admin" : "tenant"}/dashboard" class="logo">
+              <div class="logo-icon logo-mark">GT</div><div class="logo-text"><div class="logo-name">Godstime Lodge</div><div class="logo-sub">${escapeHtml(roleLabel)}</div></div>
+            </a>
+            <div class="nav-menu">
+              ${links}
+            </div>
+          </div>
+          <div class="nav-right">
+            ${themeToggle}
+            <button class="user-menu">
+              <div class="user-avatar">${avatar}</div>
+              <span class="user-name">${name}</span>
+            </button>
+            <a href="/logout" class="btn-logout" title="Logout">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            </a>
+          </div>
+        </div>
+      </nav>
+      ${body}
+      <footer class="footer"><p>&copy; 2026 Sbiam Solutions. All rights reserved.</p></footer>
+    </div>`
+  );
+}
+
+function sectionHeader(title, subtitle, message = "") {
+  const banner = message
+    ? `<div class="alert" style="margin-bottom:1rem; padding:0.9rem 1rem; border:1px solid var(--border); border-radius:16px; background:rgba(34,197,94,0.08); color:var(--text-primary);">${escapeHtml(message)}</div>`
+    : "";
+  return `${banner}<div class="page-header"><h1 class="greeting">${escapeHtml(title)}</h1><p class="greeting-sub">${escapeHtml(subtitle)}</p></div>`;
+}
+
 function loginView(error = "") {
   const err = error
     ? `<div class="alert alert-error" style="margin-bottom:1rem;">${escapeHtml(error)}</div>`
@@ -549,6 +611,20 @@ function tenantDashboardView(user, db, flash = "") {
           </div>
         </div>
 
+        <div class="card" style="margin-top: 1.5rem;">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title">Open Pages</h3>
+              <p class="card-subtitle">Jump straight to the page you need</p>
+            </div>
+          </div>
+          <div style="padding: 1rem 1.25rem; display:flex; gap:0.75rem; flex-wrap:wrap;">
+            <a class="btn btn-secondary" href="/tenant/bills">Bills</a>
+            <a class="btn btn-secondary" href="/tenant/payments">Payments</a>
+            <a class="btn btn-secondary" href="/tenant/requests">Maintenance</a>
+          </div>
+        </div>
+
         <div class="two-col">
           <div class="card">
             <div class="card-header">
@@ -556,6 +632,7 @@ function tenantDashboardView(user, db, flash = "") {
                 <h3 class="card-title">My Account</h3>
                 <p class="card-subtitle">Your current tenant profile details</p>
               </div>
+              <a href="/tenant/account" class="btn btn-secondary">Open page</a>
             </div>
             <div style="padding: 1rem 1.25rem; display:grid; gap:0.9rem; color: var(--text-primary);">
               <div><strong>Full Name:</strong> ${escapeHtml(user.fullName || "Not set")}</div>
@@ -719,6 +796,284 @@ function tenantDashboardView(user, db, flash = "") {
       <footer class="footer"><p>&copy; 2026 Sbiam Solutions. All rights reserved.</p></footer>
     </div>`
   );
+}
+
+function tenantBillsPage(user, db, flash = "") {
+  const bills = db.bills
+    .filter((bill) => bill.tenantId === user.id)
+    .sort((a, b) => Date.parse(a.dueDate || a.createdAt) - Date.parse(b.dueDate || b.createdAt));
+  const rows = bills.length
+    ? bills
+        .map(
+          (bill) => `<tr>
+            <td style="padding:0.9rem 0.75rem;"><strong>${escapeHtml(bill.title)}</strong></td>
+            <td style="padding:0.9rem 0.75rem;">${formatCurrency(bill.amount)}</td>
+            <td style="padding:0.9rem 0.75rem;">${escapeHtml(bill.dueDate || "Not set")}</td>
+            <td style="padding:0.9rem 0.75rem; text-transform:capitalize;">${escapeHtml(bill.status)}</td>
+          </tr>`
+        )
+        .join("")
+    : `<tr><td colspan="4" style="padding:1rem 0.75rem; color:var(--text-secondary);">No bills have been assigned yet.</td></tr>`;
+  const unpaid = bills.filter((bill) => bill.status !== "paid").reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
+  const active = bills.filter((bill) => bill.status !== "paid").length;
+
+  return layoutPage({
+    title: "My Bills - Godstime Lodge",
+    activePath: "/tenant/bills",
+    user,
+    roleLabel: "Tenant Portal",
+    navLinks: tenantNavLinks(),
+    body: `<main class="main-content">
+      ${sectionHeader("My Bills", "A dedicated page for your lodge charges and due dates.", flash)}
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-label">Outstanding</div><div class="stat-value">${formatCurrency(unpaid)}</div><div class="stat-change">${active} unpaid bills</div></div>
+        <div class="stat-card"><div class="stat-label">Total Bills</div><div class="stat-value">${bills.length}</div><div class="stat-change positive">Visible charges for your account</div></div>
+        <div class="stat-card"><div class="stat-label">Account</div><div class="stat-value">${escapeHtml(user.unit || "Pending")}</div><div class="stat-change positive">Unit assignment</div></div>
+        <div class="stat-card"><div class="stat-label">Status</div><div class="stat-value">Live</div><div class="stat-change positive">Loaded from the backend</div></div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <div><h3 class="card-title">Bill Records</h3><p class="card-subtitle">Your full bill history</p></div>
+        </div>
+        <div class="card-scroll">
+          <div class="card-scroll-inner" style="min-width: 700px;">
+            <table style="width:100%; border-collapse:collapse;">
+              <thead>
+                <tr style="text-align:left; color:var(--text-secondary); border-bottom:1px solid var(--border);">
+                  <th style="padding:0.9rem 0.75rem;">Bill</th>
+                  <th style="padding:0.9rem 0.75rem;">Amount</th>
+                  <th style="padding:0.9rem 0.75rem;">Due Date</th>
+                  <th style="padding:0.9rem 0.75rem;">Status</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </main>`,
+  });
+}
+
+function tenantPaymentsPage(user, db, flash = "") {
+  const bills = db.bills.filter((bill) => bill.tenantId === user.id);
+  const payments = db.payments
+    .filter((payment) => payment.tenantId === user.id)
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const options = bills.length
+    ? bills.map((bill) => `<option value="${escapeHtml(bill.id)}">${escapeHtml(bill.title)} - ${formatCurrency(bill.amount)}</option>`).join("")
+    : `<option value="">No bill selected</option>`;
+  const items = payments.length
+    ? payments.map((payment) => `<div class="activity-item">
+      <div class="activity-icon green">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+      </div>
+      <div class="activity-content">
+        <p class="activity-text"><strong>${formatCurrency(payment.amount)}</strong></p>
+        <p class="activity-text" style="color:var(--text-secondary);">${escapeHtml(payment.note || "No note added")}</p>
+        <span class="activity-time">${escapeHtml(payment.status)} • ${formatDateTime(payment.createdAt)}</span>
+      </div>
+    </div>`).join("")
+    : `<div style="padding:1rem; color:var(--text-secondary);">No payments submitted yet.</div>`;
+
+  return layoutPage({
+    title: "My Payments - Godstime Lodge",
+    activePath: "/tenant/payments",
+    user,
+    roleLabel: "Tenant Portal",
+    navLinks: tenantNavLinks(),
+    body: `<main class="main-content">
+      ${sectionHeader("My Payments", "Submit a new payment and track your payment history.", flash)}
+      <div class="two-col">
+        <div class="card">
+          <div class="card-header"><div><h3 class="card-title">Submit Payment</h3><p class="card-subtitle">Attach a payment to one of your bills</p></div></div>
+          <form method="post" action="/tenant/payments" style="padding:1rem 1.25rem; display:grid; gap:0.85rem;">
+            <div class="form-group"><label class="form-label">Bill</label><select name="bill_id" class="form-input">${options}</select></div>
+            <div class="form-group"><label class="form-label">Amount</label><input name="amount" type="number" min="0" step="100" class="form-input" placeholder="e.g. 250000" required /></div>
+            <div class="form-group"><label class="form-label">Note</label><input name="note" type="text" class="form-input" placeholder="Transfer reference or note" /></div>
+            <button type="submit" class="btn btn-primary">Submit Payment</button>
+          </form>
+        </div>
+        <div class="card">
+          <div class="card-header"><div><h3 class="card-title">History</h3><p class="card-subtitle">Your submitted payments</p></div></div>
+          <div class="card-scroll"><div class="card-scroll-inner" style="min-width: 340px;"><div class="activity-feed">${items}</div></div></div>
+        </div>
+      </div>
+    </main>`,
+  });
+}
+
+function tenantMaintenancePage(user, db, flash = "") {
+  const requests = db.maintenanceRequests
+    .filter((request) => request.tenantId === user.id)
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const items = requests.length
+    ? requests.map((request) => `<div class="activity-item">
+      <div class="activity-icon orange">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      </div>
+      <div class="activity-content">
+        <p class="activity-text"><strong>${escapeHtml(request.title)}</strong></p>
+        <p class="activity-text" style="color:var(--text-secondary);">${escapeHtml(request.description)}</p>
+        <span class="activity-time">${escapeHtml(request.status)} • ${formatDateTime(request.createdAt)}</span>
+      </div>
+    </div>`).join("")
+    : `<div style="padding:1rem; color:var(--text-secondary);">No maintenance requests yet.</div>`;
+
+  return layoutPage({
+    title: "Maintenance - Godstime Lodge",
+    activePath: "/tenant/requests",
+    user,
+    roleLabel: "Tenant Portal",
+    navLinks: tenantNavLinks(),
+    body: `<main class="main-content">
+      ${sectionHeader("Maintenance Requests", "Send issues to management and track the status here.", flash)}
+      <div class="two-col">
+        <div class="card">
+          <div class="card-header"><div><h3 class="card-title">New Request</h3><p class="card-subtitle">Tell management what needs attention</p></div></div>
+          <form method="post" action="/tenant/requests" style="padding:1rem 1.25rem; display:grid; gap:0.85rem;">
+            <div class="form-group"><label class="form-label">Title</label><input name="title" type="text" class="form-input" placeholder="e.g. Water leak in bathroom" required /></div>
+            <div class="form-group"><label class="form-label">Description</label><textarea name="description" class="form-input" rows="4" placeholder="Describe the issue" required></textarea></div>
+            <button type="submit" class="btn btn-primary">Send Request</button>
+          </form>
+        </div>
+        <div class="card">
+          <div class="card-header"><div><h3 class="card-title">Request History</h3><p class="card-subtitle">Your maintenance tickets</p></div></div>
+          <div class="card-scroll"><div class="card-scroll-inner" style="min-width: 340px;"><div class="activity-feed">${items}</div></div></div>
+        </div>
+      </div>
+    </main>`,
+  });
+}
+
+function tenantNavLinks() {
+  return [
+    {
+      href: "/tenant/dashboard",
+      label: "Dashboard",
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0 1 13 0"/></svg>',
+    },
+    {
+      href: "/tenant/bills",
+      label: "Bills",
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="13" y2="15"/></svg>',
+    },
+    {
+      href: "/tenant/payments",
+      label: "Payments",
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>',
+    },
+    {
+      href: "/tenant/requests",
+      label: "Maintenance",
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+    },
+    {
+      href: "/tenant/account",
+      label: "Account",
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4z"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>',
+    },
+  ];
+}
+
+function tenantAccountPage(user, db, flash = "") {
+  const bills = db.bills.filter((bill) => bill.tenantId === user.id);
+  const payments = db.payments.filter((payment) => payment.tenantId === user.id);
+  const requests = db.maintenanceRequests.filter((request) => request.tenantId === user.id);
+  const approvedPayments = payments.filter((payment) => payment.status === "approved").reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
+  const openBills = bills.filter((bill) => bill.status !== "paid");
+  const content = `
+    ${sectionHeader("My Account", "Review your tenant profile and account activity in one place.", flash)}
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">Full Name</div>
+        <div class="stat-value" style="font-size:1.1rem;">${escapeHtml(user.fullName || "Not set")}</div>
+        <div class="stat-change positive">Profile name on file</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Email</div>
+        <div class="stat-value" style="font-size:1rem;">${escapeHtml(user.email)}</div>
+        <div class="stat-change positive">Login address</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Unit</div>
+        <div class="stat-value">${escapeHtml(user.unit || "Not assigned")}</div>
+        <div class="stat-change positive">Keep this updated with management</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Approved Paid</div>
+        <div class="stat-value">${formatCurrency(approvedPayments)}</div>
+        <div class="stat-change">${openBills.length} open bill(s)</div>
+      </div>
+    </div>
+
+    <div class="two-col">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h3 class="card-title">Profile Details</h3>
+            <p class="card-subtitle">Everything the portal has on record for you</p>
+          </div>
+        </div>
+        <div style="padding: 1rem 1.25rem; display:grid; gap:0.9rem; color: var(--text-primary);">
+          <div><strong>Full Name:</strong> ${escapeHtml(user.fullName || "Not set")}</div>
+          <div><strong>Email:</strong> ${escapeHtml(user.email)}</div>
+          <div><strong>Unit:</strong> ${escapeHtml(user.unit || "Not assigned")}</div>
+          <div><strong>Role:</strong> Tenant</div>
+          <div><strong>Joined:</strong> ${formatDateOnly(user.createdAt)}</div>
+          <div><strong>Access:</strong> Protected by login</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h3 class="card-title">Account Activity</h3>
+            <p class="card-subtitle">Quick counts for your portal usage</p>
+          </div>
+        </div>
+        <div style="padding: 1rem 1.25rem; display:grid; gap:0.9rem;">
+          <div><strong>Bills:</strong> ${bills.length}</div>
+          <div><strong>Payments:</strong> ${payments.length}</div>
+          <div><strong>Maintenance Requests:</strong> ${requests.length}</div>
+          <div><strong>Open Bills:</strong> ${openBills.length}</div>
+        </div>
+      </div>
+    </div>`;
+
+  return layoutPage({
+    title: "Account - Godstime Lodge",
+    activePath: "/tenant/account",
+    user,
+    roleLabel: "Tenant Portal",
+    navLinks: tenantNavLinks(),
+    body: `<main class="main-content">${content}</main>`,
+  });
+}
+
+function adminNavLinks() {
+  return [
+    {
+      href: "/admin/dashboard",
+      label: "Dashboard",
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>',
+    },
+    {
+      href: "/admin/bills",
+      label: "Bills",
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="13" y2="15"/></svg>',
+    },
+    {
+      href: "/admin/payments",
+      label: "Payments",
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>',
+    },
+    {
+      href: "/admin/maintenance",
+      label: "Maintenance",
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+    },
+  ];
 }
 
 function adminDashboardView(user, db, flash = "") {
@@ -930,6 +1285,20 @@ function adminDashboardView(user, db, flash = "") {
           </div>
         </div>
 
+        <div class="card" style="margin-top: 1.5rem;">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title">Open Pages</h3>
+              <p class="card-subtitle">Go directly to the management screen you need</p>
+            </div>
+          </div>
+          <div style="padding: 1rem 1.25rem; display:flex; gap:0.75rem; flex-wrap:wrap;">
+            <a class="btn btn-secondary" href="/admin/bills">Bills</a>
+            <a class="btn btn-secondary" href="/admin/payments">Payments</a>
+            <a class="btn btn-secondary" href="/admin/maintenance">Maintenance</a>
+          </div>
+        </div>
+
         <div class="two-col">
           <div class="card" id="tenants">
             <div class="card-header">
@@ -1058,6 +1427,201 @@ function adminDashboardView(user, db, flash = "") {
       <footer class="footer"><p>&copy; 2026 Sbiam Solutions. All rights reserved.</p></footer>
     </div>`
   );
+}
+
+function adminBillsPage(user, db, flash = "") {
+  const tenants = db.users.filter((item) => item.role === "tenant");
+  const bills = db.bills.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const billTenantOptions = tenants.length
+    ? tenants
+        .map((tenant) => `<option value="${escapeHtml(tenant.id)}">${escapeHtml((tenant.fullName || tenant.email) + (tenant.unit ? ` - ${tenant.unit}` : ""))}</option>`)
+        .join("")
+    : `<option value="">No tenants available</option>`;
+  const rows = bills.length
+    ? bills
+        .map((bill) => {
+          const tenant = db.users.find((item) => item.id === bill.tenantId);
+          return `<tr>
+            <td style="padding:0.9rem 0.75rem;"><strong>${escapeHtml(bill.title)}</strong></td>
+            <td style="padding:0.9rem 0.75rem;">${escapeHtml(tenant ? tenant.fullName || tenant.email : "Unknown tenant")}</td>
+            <td style="padding:0.9rem 0.75rem;">${formatCurrency(bill.amount)}</td>
+            <td style="padding:0.9rem 0.75rem;">${escapeHtml(bill.dueDate || "Not set")}</td>
+            <td style="padding:0.9rem 0.75rem; text-transform:capitalize;">${escapeHtml(bill.status)}</td>
+          </tr>`;
+        })
+        .join("")
+    : `<tr><td colspan="5" style="padding:1rem 0.75rem; color:var(--text-secondary);">No bills created yet.</td></tr>`;
+
+  return layoutPage({
+    title: "Bills - Godstime Lodge",
+    activePath: "/admin/bills",
+    user,
+    roleLabel: "Admin Dashboard",
+    navLinks: adminNavLinks(),
+    body: `<main class="main-content">
+      ${sectionHeader("Bills", "Create and review lodge charges from one page.", flash)}
+      <div class="two-col">
+        <div class="card">
+          <div class="card-header"><div><h3 class="card-title">Create Bill</h3><p class="card-subtitle">Assign a charge to a tenant</p></div></div>
+          <form method="post" action="/admin/bills" style="padding:1rem 1.25rem; display:grid; gap:0.85rem;">
+            <div class="form-group"><label class="form-label">Tenant</label><select name="tenant_id" class="form-input">${billTenantOptions}</select></div>
+            <div class="form-group"><label class="form-label">Bill Title</label><input name="title" type="text" class="form-input" placeholder="e.g. April Rent" required /></div>
+            <div class="form-group"><label class="form-label">Amount</label><input name="amount" type="number" min="0" step="100" class="form-input" placeholder="e.g. 250000" required /></div>
+            <div class="form-group"><label class="form-label">Due Date</label><input name="due_date" type="date" class="form-input" required /></div>
+            <button type="submit" class="btn btn-primary">Create Bill</button>
+          </form>
+        </div>
+        <div class="card">
+          <div class="card-header"><div><h3 class="card-title">Bill Stats</h3><p class="card-subtitle">Quick overview</p></div></div>
+          <div style="padding:1rem 1.25rem; display:grid; gap:1rem;">
+            <div><strong>Total Bills:</strong> ${bills.length}</div>
+            <div><strong>Unpaid Bills:</strong> ${bills.filter((bill) => bill.status !== "paid").length}</div>
+            <div><strong>Total Value:</strong> ${formatCurrency(bills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0))}</div>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:1.5rem;">
+        <div class="card-header"><div><h3 class="card-title">Recent Bills</h3><p class="card-subtitle">Latest charges across all tenants</p></div></div>
+        <div class="card-scroll">
+          <div class="card-scroll-inner" style="min-width:700px;">
+            <table style="width:100%; border-collapse:collapse;">
+              <thead>
+                <tr style="text-align:left; color:var(--text-secondary); border-bottom:1px solid var(--border);">
+                  <th style="padding:0.9rem 0.75rem;">Bill</th>
+                  <th style="padding:0.9rem 0.75rem;">Tenant</th>
+                  <th style="padding:0.9rem 0.75rem;">Amount</th>
+                  <th style="padding:0.9rem 0.75rem;">Due Date</th>
+                  <th style="padding:0.9rem 0.75rem;">Status</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </main>`,
+  });
+}
+
+function adminPaymentsPage(user, db, flash = "") {
+  const payments = db.payments.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const rows = payments.length
+    ? payments
+        .map((payment) => {
+          const tenant = db.users.find((item) => item.id === payment.tenantId);
+          const bill = db.bills.find((item) => item.id === payment.billId);
+          return `<tr>
+            <td style="padding:0.9rem 0.75rem;"><strong>${escapeHtml(tenant ? tenant.fullName || tenant.email : "Unknown tenant")}</strong></td>
+            <td style="padding:0.9rem 0.75rem;">${escapeHtml(bill ? bill.title : "No bill linked")}</td>
+            <td style="padding:0.9rem 0.75rem;">${formatCurrency(payment.amount)}</td>
+            <td style="padding:0.9rem 0.75rem; text-transform:capitalize;">${escapeHtml(payment.status)}</td>
+            <td style="padding:0.9rem 0.75rem;">
+              <form method="post" action="/admin/payments/status" style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                <input type="hidden" name="payment_id" value="${escapeHtml(payment.id)}" />
+                <button class="btn btn-primary" type="submit" name="status" value="approved">Approve</button>
+                <button class="btn btn-secondary" type="submit" name="status" value="rejected">Reject</button>
+              </form>
+            </td>
+          </tr>`;
+        })
+        .join("")
+    : `<tr><td colspan="5" style="padding:1rem 0.75rem; color:var(--text-secondary);">No payment submissions yet.</td></tr>`;
+
+  return layoutPage({
+    title: "Payments - Godstime Lodge",
+    activePath: "/admin/payments",
+    user,
+    roleLabel: "Admin Dashboard",
+    navLinks: adminNavLinks(),
+    body: `<main class="main-content">
+      ${sectionHeader("Payments", "Review tenant payment submissions and approve them.", flash)}
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-label">Submitted</div><div class="stat-value">${payments.length}</div><div class="stat-change positive">Total payment records</div></div>
+        <div class="stat-card"><div class="stat-label">Pending</div><div class="stat-value">${payments.filter((payment) => payment.status === "pending").length}</div><div class="stat-change positive">Waiting for review</div></div>
+        <div class="stat-card"><div class="stat-label">Approved</div><div class="stat-value">${payments.filter((payment) => payment.status === "approved").length}</div><div class="stat-change positive">Already confirmed</div></div>
+        <div class="stat-card"><div class="stat-label">Total Value</div><div class="stat-value">${formatCurrency(payments.reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0))}</div><div class="stat-change positive">All payment submissions</div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div><h3 class="card-title">Payment Review Queue</h3><p class="card-subtitle">Approve or reject each submission</p></div></div>
+        <div class="card-scroll">
+          <div class="card-scroll-inner" style="min-width:900px;">
+            <table style="width:100%; border-collapse:collapse;">
+              <thead>
+                <tr style="text-align:left; color:var(--text-secondary); border-bottom:1px solid var(--border);">
+                  <th style="padding:0.9rem 0.75rem;">Tenant</th>
+                  <th style="padding:0.9rem 0.75rem;">Bill</th>
+                  <th style="padding:0.9rem 0.75rem;">Amount</th>
+                  <th style="padding:0.9rem 0.75rem;">Status</th>
+                  <th style="padding:0.9rem 0.75rem;">Action</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </main>`,
+  });
+}
+
+function adminMaintenancePage(user, db, flash = "") {
+  const requests = db.maintenanceRequests.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const rows = requests.length
+    ? requests
+        .map((request) => {
+          const tenant = db.users.find((item) => item.id === request.tenantId);
+          return `<tr>
+            <td style="padding:0.9rem 0.75rem;"><strong>${escapeHtml(tenant ? tenant.fullName || tenant.email : "Unknown tenant")}</strong></td>
+            <td style="padding:0.9rem 0.75rem;">${escapeHtml(request.title)}</td>
+            <td style="padding:0.9rem 0.75rem;">${escapeHtml(request.description)}</td>
+            <td style="padding:0.9rem 0.75rem; text-transform:capitalize;">${escapeHtml(request.status)}</td>
+            <td style="padding:0.9rem 0.75rem;">
+              <form method="post" action="/admin/maintenance/status" style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                <input type="hidden" name="request_id" value="${escapeHtml(request.id)}" />
+                <button class="btn btn-primary" type="submit" name="status" value="in-progress">In Progress</button>
+                <button class="btn btn-secondary" type="submit" name="status" value="resolved">Resolve</button>
+              </form>
+            </td>
+          </tr>`;
+        })
+        .join("")
+    : `<tr><td colspan="5" style="padding:1rem 0.75rem; color:var(--text-secondary);">No maintenance requests yet.</td></tr>`;
+
+  return layoutPage({
+    title: "Maintenance - Godstime Lodge",
+    activePath: "/admin/maintenance",
+    user,
+    roleLabel: "Admin Dashboard",
+    navLinks: adminNavLinks(),
+    body: `<main class="main-content">
+      ${sectionHeader("Maintenance", "Track and update tenant requests from one page.", flash)}
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-label">Requests</div><div class="stat-value">${requests.length}</div><div class="stat-change positive">All maintenance tickets</div></div>
+        <div class="stat-card"><div class="stat-label">Open</div><div class="stat-value">${requests.filter((request) => request.status === "open").length}</div><div class="stat-change positive">Waiting to be handled</div></div>
+        <div class="stat-card"><div class="stat-label">In Progress</div><div class="stat-value">${requests.filter((request) => request.status === "in-progress").length}</div><div class="stat-change positive">Being worked on</div></div>
+        <div class="stat-card"><div class="stat-label">Resolved</div><div class="stat-value">${requests.filter((request) => request.status === "resolved").length}</div><div class="stat-change positive">Closed tickets</div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div><h3 class="card-title">Maintenance Queue</h3><p class="card-subtitle">Update status for each request</p></div></div>
+        <div class="card-scroll">
+          <div class="card-scroll-inner" style="min-width:900px;">
+            <table style="width:100%; border-collapse:collapse;">
+              <thead>
+                <tr style="text-align:left; color:var(--text-secondary); border-bottom:1px solid var(--border);">
+                  <th style="padding:0.9rem 0.75rem;">Tenant</th>
+                  <th style="padding:0.9rem 0.75rem;">Title</th>
+                  <th style="padding:0.9rem 0.75rem;">Description</th>
+                  <th style="padding:0.9rem 0.75rem;">Status</th>
+                  <th style="padding:0.9rem 0.75rem;">Action</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </main>`,
+  });
 }
 
 function requireLogin(req, res) {
@@ -1195,35 +1759,57 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, tenantDashboardView(user, db, String(url.searchParams.get("message") || "")));
     }
 
+    if (pathname === "/tenant/bills") {
+      const user = requireRole(req, res, "tenant");
+      if (!user) return;
+      const db = loadDb();
+      return send(res, 200, tenantBillsPage(user, db, String(url.searchParams.get("message") || "")));
+    }
+
     if (pathname === "/tenant/payments") {
       const user = requireRole(req, res, "tenant");
       if (!user) return;
+      if (method === "GET") {
+        const db = loadDb();
+        return send(res, 200, tenantPaymentsPage(user, db, String(url.searchParams.get("message") || "")));
+      }
       if (method !== "POST") return sendText(res, 405, "Method Not Allowed", { Allow: "POST" });
-      if (!isFormRequest(req)) return redirectWithMessage(res, "/tenant/dashboard", "Unsupported payment submission.");
+      if (!isFormRequest(req)) return redirectWithMessage(res, "/tenant/payments", "Unsupported payment submission.");
       const body = await readBody(req);
       const form = parseForm(body);
       const amount = Number(form.amount || 0);
-      if (amount <= 0) return redirectWithMessage(res, "/tenant/dashboard", "Enter a valid payment amount.");
+      if (amount <= 0) return redirectWithMessage(res, "/tenant/payments", "Enter a valid payment amount.");
       const db = loadDb();
       db.payments.push(createPayment({ tenantId: user.id, billId: form.bill_id, amount, note: form.note }));
       saveDb(db);
-      return redirectWithMessage(res, "/tenant/dashboard", "Payment submitted successfully.");
+      return redirectWithMessage(res, "/tenant/payments", "Payment submitted successfully.");
     }
 
     if (pathname === "/tenant/requests") {
       const user = requireRole(req, res, "tenant");
       if (!user) return;
+      if (method === "GET") {
+        const db = loadDb();
+        return send(res, 200, tenantMaintenancePage(user, db, String(url.searchParams.get("message") || "")));
+      }
       if (method !== "POST") return sendText(res, 405, "Method Not Allowed", { Allow: "POST" });
-      if (!isFormRequest(req)) return redirectWithMessage(res, "/tenant/dashboard", "Unsupported request submission.");
+      if (!isFormRequest(req)) return redirectWithMessage(res, "/tenant/requests", "Unsupported request submission.");
       const body = await readBody(req);
       const form = parseForm(body);
       if (!String(form.title || "").trim() || !String(form.description || "").trim()) {
-        return redirectWithMessage(res, "/tenant/dashboard", "Please add a title and description for the maintenance request.");
+        return redirectWithMessage(res, "/tenant/requests", "Please add a title and description for the maintenance request.");
       }
       const db = loadDb();
       db.maintenanceRequests.push(createMaintenanceRequest({ tenantId: user.id, title: form.title, description: form.description }));
       saveDb(db);
-      return redirectWithMessage(res, "/tenant/dashboard", "Maintenance request sent.");
+      return redirectWithMessage(res, "/tenant/requests", "Maintenance request sent.");
+    }
+
+    if (pathname === "/tenant/account") {
+      const user = requireRole(req, res, "tenant");
+      if (!user) return;
+      const db = loadDb();
+      return send(res, 200, tenantAccountPage(user, db, String(url.searchParams.get("message") || "")));
     }
 
     if (pathname === "/admin/dashboard") {
@@ -1236,24 +1822,89 @@ const server = http.createServer(async (req, res) => {
     if (pathname === "/admin/bills") {
       const user = requireRole(req, res, "admin");
       if (!user) return;
-      if (method !== "POST") return sendText(res, 405, "Method Not Allowed", { Allow: "POST" });
-      if (!isFormRequest(req)) return redirectWithMessage(res, "/admin/dashboard", "Unsupported bill submission.");
+      const db = loadDb();
+      if (method === "GET") {
+        return send(res, 200, adminBillsPage(user, db, String(url.searchParams.get("message") || "")));
+      }
+      if (method !== "POST") return sendText(res, 405, "Method Not Allowed", { Allow: "GET, POST" });
+      if (!isFormRequest(req)) return redirectWithMessage(res, "/admin/bills", "Unsupported bill submission.");
       const body = await readBody(req);
       const form = parseForm(body);
       const amount = Number(form.amount || 0);
       const tenantId = String(form.tenant_id || "");
       const title = String(form.title || "").trim();
       const dueDate = String(form.due_date || "").trim();
-      const db = loadDb();
       if (!db.users.some((item) => item.id === tenantId && item.role === "tenant")) {
-        return redirectWithMessage(res, "/admin/dashboard", "Select a valid tenant before creating a bill.");
+        return redirectWithMessage(res, "/admin/bills", "Select a valid tenant before creating a bill.");
       }
       if (!title || amount <= 0 || !dueDate) {
-        return redirectWithMessage(res, "/admin/dashboard", "Please fill all bill fields correctly.");
+        return redirectWithMessage(res, "/admin/bills", "Please fill all bill fields correctly.");
       }
       db.bills.push(createBill({ tenantId, title, amount, dueDate }));
       saveDb(db);
-      return redirectWithMessage(res, "/admin/dashboard", "Bill created successfully.");
+      return redirectWithMessage(res, "/admin/bills", "Bill created successfully.");
+    }
+
+    if (pathname === "/admin/payments") {
+      const user = requireRole(req, res, "admin");
+      if (!user) return;
+      const db = loadDb();
+      if (method === "GET") {
+        return send(res, 200, adminPaymentsPage(user, db, String(url.searchParams.get("message") || "")));
+      }
+      return sendText(res, 405, "Method Not Allowed", { Allow: "GET" });
+    }
+
+    if (pathname === "/admin/payments/status") {
+      const user = requireRole(req, res, "admin");
+      if (!user) return;
+      if (method !== "POST") return sendText(res, 405, "Method Not Allowed", { Allow: "POST" });
+      if (!isFormRequest(req)) return redirectWithMessage(res, "/admin/payments", "Unsupported payment update.");
+      const body = await readBody(req);
+      const form = parseForm(body);
+      const db = loadDb();
+      const payment = db.payments.find((item) => item.id === String(form.payment_id || ""));
+      if (!payment) return redirectWithMessage(res, "/admin/payments", "Payment not found.");
+      const nextStatus = String(form.status || "").trim();
+      if (!["approved", "rejected"].includes(nextStatus)) {
+        return redirectWithMessage(res, "/admin/payments", "Choose a valid payment status.");
+      }
+      payment.status = nextStatus;
+      if (nextStatus === "approved") {
+        const bill = db.bills.find((item) => item.id === payment.billId);
+        if (bill) bill.status = "paid";
+      }
+      saveDb(db);
+      return redirectWithMessage(res, "/admin/payments", "Payment status updated.");
+    }
+
+    if (pathname === "/admin/maintenance") {
+      const user = requireRole(req, res, "admin");
+      if (!user) return;
+      const db = loadDb();
+      if (method === "GET") {
+        return send(res, 200, adminMaintenancePage(user, db, String(url.searchParams.get("message") || "")));
+      }
+      return sendText(res, 405, "Method Not Allowed", { Allow: "GET" });
+    }
+
+    if (pathname === "/admin/maintenance/status") {
+      const user = requireRole(req, res, "admin");
+      if (!user) return;
+      if (method !== "POST") return sendText(res, 405, "Method Not Allowed", { Allow: "POST" });
+      if (!isFormRequest(req)) return redirectWithMessage(res, "/admin/maintenance", "Unsupported maintenance update.");
+      const body = await readBody(req);
+      const form = parseForm(body);
+      const db = loadDb();
+      const request = db.maintenanceRequests.find((item) => item.id === String(form.request_id || ""));
+      if (!request) return redirectWithMessage(res, "/admin/maintenance", "Request not found.");
+      const nextStatus = String(form.status || "").trim();
+      if (!["open", "in-progress", "resolved"].includes(nextStatus)) {
+        return redirectWithMessage(res, "/admin/maintenance", "Choose a valid maintenance status.");
+      }
+      request.status = nextStatus;
+      saveDb(db);
+      return redirectWithMessage(res, "/admin/maintenance", "Maintenance status updated.");
     }
 
     sendText(res, 404, "Not found");
