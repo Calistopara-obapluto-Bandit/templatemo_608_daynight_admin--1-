@@ -197,6 +197,28 @@ function escapeHtml(s) {
     .replaceAll('"', "&quot;");
 }
 
+function formatDateTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown";
+  return new Intl.DateTimeFormat("en-NG", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function formatDateOnly(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown";
+  return new Intl.DateTimeFormat("en-NG", {
+    dateStyle: "medium",
+  }).format(date);
+}
+
+function percentage(part, total) {
+  if (!total) return 0;
+  return Math.round((part / total) * 100);
+}
+
 function applySecurityHeaders(res) {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Referrer-Policy", "same-origin");
@@ -377,6 +399,243 @@ function tenantDashboardView(user) {
   );
 }
 
+function adminDashboardView(user, db) {
+  const totalUnits = 25;
+  const tenants = db.users
+    .filter((item) => item.role === "tenant")
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const activeSessions = db.sessions
+    .filter((session) => Date.parse(session.expiresAt) > Date.now())
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const occupiedUnits = new Set(tenants.map((tenant) => tenant.unit).filter(Boolean)).size;
+  const occupancyRate = percentage(occupiedUnits, totalUnits);
+  const recentTenants = tenants.slice(0, 5);
+  const recentActivity = [
+    ...recentTenants.map((tenant) => ({
+      type: "tenant",
+      title: `${tenant.fullName || tenant.email} registered`,
+      detail: tenant.unit ? `Unit ${tenant.unit}` : "Unit not set yet",
+      at: tenant.createdAt,
+    })),
+    ...activeSessions.slice(0, 5).map((session) => {
+      const sessionUser = db.users.find((item) => item.id === session.userId);
+      return {
+        type: "session",
+        title: `${sessionUser ? sessionUser.fullName || sessionUser.email : "User"} signed in`,
+        detail: sessionUser && sessionUser.role === "admin" ? "Administrator session" : "Tenant session",
+        at: session.createdAt,
+      };
+    }),
+  ]
+    .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
+    .slice(0, 6);
+
+  const tenantRows = tenants.length
+    ? tenants
+        .map((tenant) => {
+          const isOnline = activeSessions.some((session) => session.userId === tenant.id);
+          return `<tr>
+            <td style="padding: 0.9rem 0.75rem;"><strong>${escapeHtml(tenant.fullName || "Unnamed tenant")}</strong><br /><span style="color: var(--text-secondary); font-size: 0.85rem;">${escapeHtml(tenant.email)}</span></td>
+            <td style="padding: 0.9rem 0.75rem;">${escapeHtml(tenant.unit || "Not assigned")}</td>
+            <td style="padding: 0.9rem 0.75rem;">${formatDateOnly(tenant.createdAt)}</td>
+            <td style="padding: 0.9rem 0.75rem;"><span style="display:inline-flex; align-items:center; gap:0.45rem; color:${isOnline ? "var(--success)" : "var(--text-secondary)"};"><span style="width:0.55rem; height:0.55rem; border-radius:999px; background:${isOnline ? "var(--success)" : "var(--border)"};"></span>${isOnline ? "Online" : "Offline"}</span></td>
+          </tr>`;
+        })
+        .join("")
+    : `<tr><td colspan="4" style="padding: 1rem 0.75rem; color: var(--text-secondary);">No tenants have registered yet.</td></tr>`;
+
+  const activityItems = recentActivity.length
+    ? recentActivity
+        .map(
+          (item) => `<div class="activity-item">
+            <div class="activity-icon ${item.type === "tenant" ? "blue" : "green"}">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                ${
+                  item.type === "tenant"
+                    ? '<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/>'
+                    : '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>'
+                }
+              </svg>
+            </div>
+            <div class="activity-content">
+              <p class="activity-text"><strong>${escapeHtml(item.title)}</strong></p>
+              <p class="activity-text" style="color: var(--text-secondary);">${escapeHtml(item.detail)}</p>
+              <span class="activity-time">${formatDateTime(item.at)}</span>
+            </div>
+          </div>`
+        )
+        .join("")
+    : `<div style="padding: 1rem; color: var(--text-secondary);">Recent activity will appear here after tenants start using the portal.</div>`;
+
+  return htmlPage(
+    "Admin Dashboard - Godstime Lodge",
+    `<div class="app-container">
+      <nav class="top-nav">
+        <div class="nav-container">
+          <div class="nav-left">
+            <a href="/admin/dashboard" class="logo">
+              <div class="logo-icon logo-mark">GT</div><div class="logo-text"><div class="logo-name">Godstime Lodge</div><div class="logo-sub">Admin Dashboard</div></div>
+            </a>
+            <div class="nav-menu">
+              <div class="nav-item">
+                <a href="/admin/dashboard" class="nav-link active">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+                  </svg>
+                  Dashboard
+                </a>
+              </div>
+              <div class="nav-item">
+                <a href="#tenants" class="nav-link">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0 1 13 0"/>
+                  </svg>
+                  Tenants
+                </a>
+              </div>
+            </div>
+          </div>
+          <div class="nav-right">
+            <div class="theme-toggle">
+              <button class="theme-btn theme-btn-snow active" onclick="setTheme('snow')" title="Snow Edition">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+              </button>
+              <button class="theme-btn theme-btn-carbon" onclick="setTheme('carbon')" title="Carbon Edition">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+              </button>
+            </div>
+            <button class="user-menu">
+              <div class="user-avatar">${escapeHtml((user.fullName || "A").slice(0, 1).toUpperCase())}</div>
+              <span class="user-name">${escapeHtml(user.fullName || "Admin")}</span>
+            </button>
+            <a href="/logout" class="btn-logout" title="Logout">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            </a>
+          </div>
+        </div>
+      </nav>
+      <main class="main-content">
+        <div class="page-header">
+          <h1 class="greeting">Welcome back, ${escapeHtml(user.fullName || "Admin")}</h1>
+          <p class="greeting-sub">This dashboard now uses your live tenant and session data.</p>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label">Registered Tenants</div>
+            <div class="stat-value">${tenants.length}</div>
+            <div class="stat-change positive">Live tenant accounts in the system</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Occupied Units</div>
+            <div class="stat-value">${occupiedUnits}</div>
+            <div class="stat-change positive">${occupancyRate}% of ${totalUnits} units are assigned</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Active Sessions</div>
+            <div class="stat-value">${activeSessions.length}</div>
+            <div class="stat-change positive">Users currently signed in</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Available Units</div>
+            <div class="stat-value">${Math.max(totalUnits - occupiedUnits, 0)}</div>
+            <div class="stat-change">${Math.max(totalUnits - occupiedUnits, 0)} units still open</div>
+          </div>
+        </div>
+
+        <div class="two-col">
+          <div class="card" id="tenants">
+            <div class="card-header">
+              <div>
+                <h3 class="card-title">Tenant Directory</h3>
+                <p class="card-subtitle">Live tenant records from the registration system</p>
+              </div>
+            </div>
+            <div class="card-scroll">
+              <div class="card-scroll-inner" style="min-width: 700px;">
+                <table style="width: 100%; border-collapse: collapse;">
+                  <thead>
+                    <tr style="text-align: left; color: var(--text-secondary); border-bottom: 1px solid var(--border);">
+                      <th style="padding: 0.9rem 0.75rem;">Tenant</th>
+                      <th style="padding: 0.9rem 0.75rem;">Unit</th>
+                      <th style="padding: 0.9rem 0.75rem;">Joined</th>
+                      <th style="padding: 0.9rem 0.75rem;">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>${tenantRows}</tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h3 class="card-title">Recent Activity</h3>
+                <p class="card-subtitle">Latest registrations and sign-ins</p>
+              </div>
+            </div>
+            <div class="card-scroll">
+              <div class="card-scroll-inner" style="min-width: 340px;">
+                <div class="activity-feed">${activityItems}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="two-col" style="margin-top: 1.5rem;">
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h3 class="card-title">Admin Summary</h3>
+                <p class="card-subtitle">A quick operational view of the lodge</p>
+              </div>
+            </div>
+            <div style="padding: 1rem 1.25rem; display: grid; gap: 1rem;">
+              <div>
+                <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
+                  <span>Occupancy progress</span>
+                  <strong>${occupancyRate}%</strong>
+                </div>
+                <div class="progress-bar"><div class="progress-fill success" style="width: ${occupancyRate}%;"></div></div>
+              </div>
+              <div>
+                <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
+                  <span>Tenant account coverage</span>
+                  <strong>${percentage(tenants.length, totalUnits)}%</strong>
+                </div>
+                <div class="progress-bar"><div class="progress-fill accent" style="width: ${percentage(tenants.length, totalUnits)}%;"></div></div>
+              </div>
+              <div>
+                <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
+                  <span>Users currently active</span>
+                  <strong>${percentage(activeSessions.length, Math.max(db.users.length, 1))}%</strong>
+                </div>
+                <div class="progress-bar"><div class="progress-fill warning" style="width: ${percentage(activeSessions.length, Math.max(db.users.length, 1))}%;"></div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h3 class="card-title">Next Steps</h3>
+                <p class="card-subtitle">Suggested admin actions</p>
+              </div>
+            </div>
+            <div style="padding: 1rem 1.25rem; color: var(--text-secondary); display:grid; gap:0.85rem;">
+              <div>Ask new tenants to register so they appear automatically in this dashboard.</div>
+              <div>Assign unit numbers during registration to improve occupancy reporting.</div>
+              <div>The next feature we can add is bill tracking, payment records, and maintenance requests for each tenant.</div>
+            </div>
+          </div>
+        </div>
+      </main>
+      <footer class="footer"><p>&copy; 2026 Sbiam Solutions. All rights reserved.</p></footer>
+    </div>`
+  );
+}
+
 function requireLogin(req, res) {
   const user = getCurrentUser(req);
   if (!user) {
@@ -508,12 +767,8 @@ const server = http.createServer(async (req, res) => {
     if (pathname === "/admin/dashboard") {
       const user = requireRole(req, res, "admin");
       if (!user) return;
-      const adminFile = path.join(PUBLIC_DIR, "admin-dashboard.html");
-      if (fs.existsSync(adminFile)) {
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
-        return fs.createReadStream(adminFile).pipe(res);
-      }
-      return sendText(res, 500, "Admin dashboard not found.");
+      const db = loadDb();
+      return send(res, 200, adminDashboardView(user, db));
     }
 
     sendText(res, 404, "Not found");
