@@ -434,6 +434,23 @@ function renderShellChrome({
   return { mobileMenu, topNav };
 }
 
+function renderActivityItem({ tone = "blue", iconSvg, title, detail, time }) {
+  return `<div class="activity-item">
+    <div class="activity-icon ${tone}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${iconSvg}</svg>
+    </div>
+    <div class="activity-content">
+      <p class="activity-text"><strong>${escapeHtml(title)}</strong></p>
+      <p class="activity-text" style="color: var(--text-secondary);">${escapeHtml(detail)}</p>
+      <span class="activity-time">${escapeHtml(time)}</span>
+    </div>
+  </div>`;
+}
+
+function renderActivityFeed(items, emptyMessage) {
+  return items.length ? items.join("") : `<div style="padding:1rem; color:var(--text-secondary);">${escapeHtml(emptyMessage)}</div>`;
+}
+
 function sectionHeader(title, subtitle, message = "") {
   const banner = message
     ? `<div class="alert" style="margin-bottom:1rem; padding:0.9rem 1rem; border:1px solid var(--border); border-radius:16px; background:rgba(34,197,94,0.08); color:var(--text-primary);">${escapeHtml(message)}</div>`
@@ -538,8 +555,89 @@ function tenantDashboardView(user, db, flash = "") {
   const payments = db.payments
     .filter((payment) => payment.tenantId === user.id)
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const requests = db.maintenanceRequests
+    .filter((request) => request.tenantId === user.id)
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   const totalDue = bills.filter((bill) => bill.status !== "paid").reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
   const totalPaid = payments.filter((payment) => payment.status === "approved").reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
+  const recentActivity = [];
+  if (currentSession) {
+    recentActivity.push(
+      renderActivityItem({
+        tone: "green",
+        iconSvg: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
+        title: "Signed in",
+        detail: "Your current session is active",
+        time: formatDateTime(currentSession.createdAt),
+      })
+    );
+  }
+  if (bills[0]) {
+    recentActivity.push(
+      renderActivityItem({
+        tone: "blue",
+        iconSvg: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="13" y2="15"/>',
+        title: bills[0].title,
+        detail: `Bill added for ${formatCurrency(bills[0].amount)}`,
+        time: formatDateTime(bills[0].createdAt),
+      })
+    );
+  }
+  if (bills[1]) {
+    recentActivity.push(
+      renderActivityItem({
+        tone: "blue",
+        iconSvg: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="13" y2="15"/>',
+        title: bills[1].title,
+        detail: `Bill added for ${formatCurrency(bills[1].amount)}`,
+        time: formatDateTime(bills[1].createdAt),
+      })
+    );
+  }
+  if (payments[0]) {
+    recentActivity.push(
+      renderActivityItem({
+        tone: "green",
+        iconSvg: '<path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+        title: "Payment submitted",
+        detail: `${formatCurrency(payments[0].amount)} is ${payments[0].status}`,
+        time: formatDateTime(payments[0].createdAt),
+      })
+    );
+  }
+  if (payments[1]) {
+    recentActivity.push(
+      renderActivityItem({
+        tone: "green",
+        iconSvg: '<path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+        title: "Another payment",
+        detail: `${formatCurrency(payments[1].amount)} is ${payments[1].status}`,
+        time: formatDateTime(payments[1].createdAt),
+      })
+    );
+  }
+  if (requests[0]) {
+    recentActivity.push(
+      renderActivityItem({
+        tone: "orange",
+        iconSvg: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+        title: requests[0].title,
+        detail: `Maintenance request is ${requests[0].status}`,
+        time: formatDateTime(requests[0].createdAt),
+      })
+    );
+  }
+  if (requests[1]) {
+    recentActivity.push(
+      renderActivityItem({
+        tone: "orange",
+        iconSvg: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+        title: requests[1].title,
+        detail: `Maintenance request is ${requests[1].status}`,
+        time: formatDateTime(requests[1].createdAt),
+      })
+    );
+  }
   const flashBanner = flash
     ? `<div class="alert" style="margin-bottom:1rem; padding:0.9rem 1rem; border:1px solid var(--border); border-radius:16px; background:rgba(34,197,94,0.08); color:var(--text-primary);">${escapeHtml(flash)}</div>`
     : "";
@@ -636,6 +734,20 @@ function tenantDashboardView(user, db, flash = "") {
                 </div>
                 <div class="progress-bar"><div class="progress-fill accent" style="width: ${user.unit ? 100 : 60}%;"></div></div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top: 1.5rem;">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title">Recent Activity</h3>
+              <p class="card-subtitle">Latest events on your account</p>
+            </div>
+          </div>
+          <div class="card-scroll">
+            <div class="card-scroll-inner" style="min-width: 340px;">
+              <div class="activity-feed">${renderActivityFeed(recentActivity, "Your activity will appear here as you use the portal.")}</div>
             </div>
           </div>
         </div>
@@ -928,6 +1040,9 @@ function adminDashboardView(user, db, flash = "") {
   const tenants = db.users
     .filter((item) => item.role === "tenant")
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const activeSessions = db.sessions
+    .filter((session) => Date.parse(session.expiresAt) > Date.now())
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   const occupiedUnits = new Set(tenants.map((tenant) => tenant.unit).filter(Boolean)).size;
   const occupancyRate = percentage(occupiedUnits, totalUnits);
   const bills = db.bills.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
@@ -935,6 +1050,125 @@ function adminDashboardView(user, db, flash = "") {
   const maintenanceRequests = db.maintenanceRequests.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   const totalOutstanding = bills.filter((bill) => bill.status !== "paid").reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
   const approvedPayments = payments.filter((payment) => payment.status === "approved").reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
+  const recentActivity = [];
+  if (tenants[0]) {
+    recentActivity.push(
+      renderActivityItem({
+        tone: "blue",
+        iconSvg: '<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/>',
+        title: `${tenants[0].fullName || tenants[0].email} registered`,
+        detail: tenants[0].unit ? `Unit ${tenants[0].unit}` : "Unit not assigned yet",
+        time: formatDateTime(tenants[0].createdAt),
+      })
+    );
+  }
+  if (tenants[1]) {
+    recentActivity.push(
+      renderActivityItem({
+        tone: "blue",
+        iconSvg: '<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/>',
+        title: `${tenants[1].fullName || tenants[1].email} registered`,
+        detail: tenants[1].unit ? `Unit ${tenants[1].unit}` : "Unit not assigned yet",
+        time: formatDateTime(tenants[1].createdAt),
+      })
+    );
+  }
+  if (bills[0]) {
+    const tenant = db.users.find((item) => item.id === bills[0].tenantId);
+    recentActivity.push(
+      renderActivityItem({
+        tone: "blue",
+        iconSvg: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="13" y2="15"/>',
+        title: bills[0].title,
+        detail: `${formatCurrency(bills[0].amount)} for ${tenant ? tenant.fullName || tenant.email : "Unknown tenant"}`,
+        time: formatDateTime(bills[0].createdAt),
+      })
+    );
+  }
+  if (bills[1]) {
+    const tenant = db.users.find((item) => item.id === bills[1].tenantId);
+    recentActivity.push(
+      renderActivityItem({
+        tone: "blue",
+        iconSvg: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="13" y2="15"/>',
+        title: bills[1].title,
+        detail: `${formatCurrency(bills[1].amount)} for ${tenant ? tenant.fullName || tenant.email : "Unknown tenant"}`,
+        time: formatDateTime(bills[1].createdAt),
+      })
+    );
+  }
+  if (payments[0]) {
+    const tenant = db.users.find((item) => item.id === payments[0].tenantId);
+    recentActivity.push(
+      renderActivityItem({
+        tone: "green",
+        iconSvg: '<path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+        title: `${tenant ? tenant.fullName || tenant.email : "Tenant"} payment`,
+        detail: `${formatCurrency(payments[0].amount)} is ${payments[0].status}`,
+        time: formatDateTime(payments[0].createdAt),
+      })
+    );
+  }
+  if (payments[1]) {
+    const tenant = db.users.find((item) => item.id === payments[1].tenantId);
+    recentActivity.push(
+      renderActivityItem({
+        tone: "green",
+        iconSvg: '<path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+        title: `${tenant ? tenant.fullName || tenant.email : "Tenant"} payment`,
+        detail: `${formatCurrency(payments[1].amount)} is ${payments[1].status}`,
+        time: formatDateTime(payments[1].createdAt),
+      })
+    );
+  }
+  if (maintenanceRequests[0]) {
+    const tenant = db.users.find((item) => item.id === maintenanceRequests[0].tenantId);
+    recentActivity.push(
+      renderActivityItem({
+        tone: "orange",
+        iconSvg: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+        title: maintenanceRequests[0].title,
+        detail: `From ${tenant ? tenant.fullName || tenant.email : "Unknown tenant"} • ${maintenanceRequests[0].status}`,
+        time: formatDateTime(maintenanceRequests[0].createdAt),
+      })
+    );
+  }
+  if (maintenanceRequests[1]) {
+    const tenant = db.users.find((item) => item.id === maintenanceRequests[1].tenantId);
+    recentActivity.push(
+      renderActivityItem({
+        tone: "orange",
+        iconSvg: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+        title: maintenanceRequests[1].title,
+        detail: `From ${tenant ? tenant.fullName || tenant.email : "Unknown tenant"} • ${maintenanceRequests[1].status}`,
+        time: formatDateTime(maintenanceRequests[1].createdAt),
+      })
+    );
+  }
+  if (activeSessions[0]) {
+    const sessionUser = db.users.find((item) => item.id === activeSessions[0].userId);
+    recentActivity.push(
+      renderActivityItem({
+        tone: "green",
+        iconSvg: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
+        title: `${sessionUser ? sessionUser.fullName || sessionUser.email : "User"} signed in`,
+        detail: sessionUser && sessionUser.role === "admin" ? "Administrator session" : "Tenant session",
+        time: formatDateTime(activeSessions[0].createdAt),
+      })
+    );
+  }
+  if (activeSessions[1]) {
+    const sessionUser = db.users.find((item) => item.id === activeSessions[1].userId);
+    recentActivity.push(
+      renderActivityItem({
+        tone: "green",
+        iconSvg: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
+        title: `${sessionUser ? sessionUser.fullName || sessionUser.email : "User"} signed in`,
+        detail: sessionUser && sessionUser.role === "admin" ? "Administrator session" : "Tenant session",
+        time: formatDateTime(activeSessions[1].createdAt),
+      })
+    );
+  }
   const flashBanner = flash
     ? `<div class="alert" style="margin-bottom:1rem; padding:0.9rem 1rem; border:1px solid var(--border); border-radius:16px; background:rgba(34,197,94,0.08); color:var(--text-primary);">${escapeHtml(flash)}</div>`
     : "";
@@ -1012,6 +1246,20 @@ function adminDashboardView(user, db, flash = "") {
                 <strong>${bills.filter((bill) => bill.status !== "paid").length + maintenanceRequests.filter((request) => request.status !== "resolved").length}</strong>
               </div>
               <div class="progress-bar"><div class="progress-fill warning" style="width: ${Math.min(100, (bills.filter((bill) => bill.status !== "paid").length + maintenanceRequests.filter((request) => request.status !== "resolved").length) * 10)}%;"></div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top: 1.5rem;">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title">Recent Activity</h3>
+              <p class="card-subtitle">Latest lodge updates in one place</p>
+            </div>
+          </div>
+          <div class="card-scroll">
+            <div class="card-scroll-inner" style="min-width: 340px;">
+              <div class="activity-feed">${renderActivityFeed(recentActivity, "Activity will appear here as the lodge starts moving.")}</div>
             </div>
           </div>
         </div>
