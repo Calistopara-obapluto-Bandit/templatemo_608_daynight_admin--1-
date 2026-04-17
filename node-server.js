@@ -528,10 +528,6 @@ function registerView(error = "") {
 }
 
 function tenantDashboardView(user, db, flash = "") {
-  const totalUnits = 25;
-  const tenants = db.users.filter((item) => item.role === "tenant");
-  const occupiedUnits = new Set(tenants.map((tenant) => tenant.unit).filter(Boolean)).size;
-  const occupancyRate = percentage(occupiedUnits, totalUnits);
   const activeSessions = db.sessions.filter((session) => Date.parse(session.expiresAt) > Date.now());
   const currentSession = activeSessions.find((session) => session.userId === user.id) || null;
   const joinedDate = formatDateOnly(user.createdAt);
@@ -542,87 +538,11 @@ function tenantDashboardView(user, db, flash = "") {
   const payments = db.payments
     .filter((payment) => payment.tenantId === user.id)
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
-  const requests = db.maintenanceRequests
-    .filter((request) => request.tenantId === user.id)
-    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   const totalDue = bills.filter((bill) => bill.status !== "paid").reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
   const totalPaid = payments.filter((payment) => payment.status === "approved").reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
-  const neighbors = tenants
-    .filter((tenant) => tenant.id !== user.id && tenant.unit)
-    .slice(0, 4);
   const flashBanner = flash
     ? `<div class="alert" style="margin-bottom:1rem; padding:0.9rem 1rem; border:1px solid var(--border); border-radius:16px; background:rgba(34,197,94,0.08); color:var(--text-primary);">${escapeHtml(flash)}</div>`
     : "";
-  const neighborItems = neighbors.length
-    ? neighbors
-        .map(
-          (tenant) => `<div class="activity-item">
-            <div class="activity-icon blue">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/>
-              </svg>
-            </div>
-            <div class="activity-content">
-              <p class="activity-text"><strong>${escapeHtml(tenant.fullName || tenant.email)}</strong></p>
-              <p class="activity-text" style="color: var(--text-secondary);">Unit ${escapeHtml(tenant.unit)}</p>
-              <span class="activity-time">Joined ${formatDateOnly(tenant.createdAt)}</span>
-            </div>
-          </div>`
-        )
-        .join("")
-    : `<div style="padding: 1rem; color: var(--text-secondary);">As more tenants register, they will show up here.</div>`;
-  const billRows = bills.length
-    ? bills
-        .map(
-          (bill) => `<tr>
-            <td style="padding:0.9rem 0.75rem;"><strong>${escapeHtml(bill.title)}</strong></td>
-            <td style="padding:0.9rem 0.75rem;">${formatCurrency(bill.amount)}</td>
-            <td style="padding:0.9rem 0.75rem;">${escapeHtml(bill.dueDate || "Not set")}</td>
-            <td style="padding:0.9rem 0.75rem; text-transform:capitalize;">${escapeHtml(bill.status)}</td>
-          </tr>`
-        )
-        .join("")
-    : `<tr><td colspan="4" style="padding:1rem 0.75rem; color:var(--text-secondary);">No bills have been assigned yet.</td></tr>`;
-  const paymentItems = payments.length
-    ? payments
-        .slice(0, 5)
-        .map((payment) => {
-          const bill = db.bills.find((item) => item.id === payment.billId);
-          return `<div class="activity-item">
-            <div class="activity-icon green">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-            </div>
-            <div class="activity-content">
-              <p class="activity-text"><strong>${formatCurrency(payment.amount)}</strong> for ${escapeHtml(bill ? bill.title : "general payment")}</p>
-              <p class="activity-text" style="color:var(--text-secondary); text-transform:capitalize;">Status: ${escapeHtml(payment.status)}</p>
-              <span class="activity-time">${formatDateTime(payment.createdAt)}</span>
-            </div>
-          </div>`;
-        })
-        .join("")
-    : `<div style="padding:1rem; color:var(--text-secondary);">No payments submitted yet.</div>`;
-  const requestItems = requests.length
-    ? requests
-        .slice(0, 5)
-        .map(
-          (request) => `<div class="activity-item">
-            <div class="activity-icon orange">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-            </div>
-            <div class="activity-content">
-              <p class="activity-text"><strong>${escapeHtml(request.title)}</strong></p>
-              <p class="activity-text" style="color:var(--text-secondary);">${escapeHtml(request.description)}</p>
-              <span class="activity-time">${escapeHtml(request.status)} • ${formatDateTime(request.createdAt)}</span>
-            </div>
-          </div>`
-        )
-        .join("")
-    : `<div style="padding:1rem; color:var(--text-secondary);">No maintenance requests yet.</div>`;
-  const billOptions = bills.length
-    ? bills
-        .map((bill) => `<option value="${escapeHtml(bill.id)}">${escapeHtml(bill.title)} - ${formatCurrency(bill.amount)}</option>`)
-        .join("")
-    : `<option value="">No bill selected</option>`;
   const shell = renderShellChrome({
     user,
     roleLabel: "Tenant Billing",
@@ -1008,9 +928,6 @@ function adminDashboardView(user, db, flash = "") {
   const tenants = db.users
     .filter((item) => item.role === "tenant")
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
-  const activeSessions = db.sessions
-    .filter((session) => Date.parse(session.expiresAt) > Date.now())
-    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   const occupiedUnits = new Set(tenants.map((tenant) => tenant.unit).filter(Boolean)).size;
   const occupancyRate = percentage(occupiedUnits, totalUnits);
   const bills = db.bills.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
@@ -1018,122 +935,9 @@ function adminDashboardView(user, db, flash = "") {
   const maintenanceRequests = db.maintenanceRequests.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   const totalOutstanding = bills.filter((bill) => bill.status !== "paid").reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
   const approvedPayments = payments.filter((payment) => payment.status === "approved").reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
-  const recentTenants = tenants.slice(0, 5);
-  const recentActivity = [
-    ...recentTenants.map((tenant) => ({
-      type: "tenant",
-      title: `${tenant.fullName || tenant.email} registered`,
-      detail: tenant.unit ? `Unit ${tenant.unit}` : "Unit not set yet",
-      at: tenant.createdAt,
-    })),
-    ...activeSessions.slice(0, 5).map((session) => {
-      const sessionUser = db.users.find((item) => item.id === session.userId);
-      return {
-        type: "session",
-        title: `${sessionUser ? sessionUser.fullName || sessionUser.email : "User"} signed in`,
-        detail: sessionUser && sessionUser.role === "admin" ? "Administrator session" : "Tenant session",
-        at: session.createdAt,
-      };
-    }),
-  ]
-    .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
-    .slice(0, 6);
-
-  const tenantRows = tenants.length
-    ? tenants
-        .map((tenant) => {
-          const isOnline = activeSessions.some((session) => session.userId === tenant.id);
-          return `<tr>
-            <td style="padding: 0.9rem 0.75rem;"><strong>${escapeHtml(tenant.fullName || "Unnamed tenant")}</strong><br /><span style="color: var(--text-secondary); font-size: 0.85rem;">${escapeHtml(tenant.email)}</span></td>
-            <td style="padding: 0.9rem 0.75rem;">${escapeHtml(tenant.unit || "Not assigned")}</td>
-            <td style="padding: 0.9rem 0.75rem;">${formatDateOnly(tenant.createdAt)}</td>
-            <td style="padding: 0.9rem 0.75rem;"><span style="display:inline-flex; align-items:center; gap:0.45rem; color:${isOnline ? "var(--success)" : "var(--text-secondary)"};"><span style="width:0.55rem; height:0.55rem; border-radius:999px; background:${isOnline ? "var(--success)" : "var(--border)"};"></span>${isOnline ? "Online" : "Offline"}</span></td>
-          </tr>`;
-        })
-        .join("")
-    : `<tr><td colspan="4" style="padding: 1rem 0.75rem; color: var(--text-secondary);">No tenants have registered yet.</td></tr>`;
-
-  const activityItems = recentActivity.length
-    ? recentActivity
-        .map(
-          (item) => `<div class="activity-item">
-            <div class="activity-icon ${item.type === "tenant" ? "blue" : "green"}">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                ${
-                  item.type === "tenant"
-                    ? '<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/>'
-                    : '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>'
-                }
-              </svg>
-            </div>
-            <div class="activity-content">
-              <p class="activity-text"><strong>${escapeHtml(item.title)}</strong></p>
-              <p class="activity-text" style="color: var(--text-secondary);">${escapeHtml(item.detail)}</p>
-              <span class="activity-time">${formatDateTime(item.at)}</span>
-            </div>
-          </div>`
-        )
-        .join("")
-    : `<div style="padding: 1rem; color: var(--text-secondary);">Recent activity will appear here after tenants start using the portal.</div>`;
   const flashBanner = flash
     ? `<div class="alert" style="margin-bottom:1rem; padding:0.9rem 1rem; border:1px solid var(--border); border-radius:16px; background:rgba(34,197,94,0.08); color:var(--text-primary);">${escapeHtml(flash)}</div>`
     : "";
-  const billTenantOptions = tenants.length
-    ? tenants
-        .map((tenant) => `<option value="${escapeHtml(tenant.id)}">${escapeHtml((tenant.fullName || tenant.email) + (tenant.unit ? ` - ${tenant.unit}` : ""))}</option>`)
-        .join("")
-    : `<option value="">No tenants available</option>`;
-  const billTableRows = bills.length
-    ? bills
-        .slice(0, 8)
-        .map((bill) => {
-          const tenant = db.users.find((userItem) => userItem.id === bill.tenantId);
-          return `<tr>
-            <td style="padding:0.9rem 0.75rem;">${escapeHtml(bill.title)}</td>
-            <td style="padding:0.9rem 0.75rem;">${escapeHtml(tenant ? tenant.fullName || tenant.email : "Unknown tenant")}</td>
-            <td style="padding:0.9rem 0.75rem;">${formatCurrency(bill.amount)}</td>
-            <td style="padding:0.9rem 0.75rem;">${escapeHtml(bill.dueDate || "Not set")}</td>
-            <td style="padding:0.9rem 0.75rem; text-transform:capitalize;">${escapeHtml(bill.status)}</td>
-          </tr>`;
-        })
-        .join("")
-    : `<tr><td colspan="5" style="padding:1rem 0.75rem; color:var(--text-secondary);">No bills created yet.</td></tr>`;
-  const paymentItems = payments.length
-    ? payments
-        .slice(0, 6)
-        .map((payment) => {
-          const tenant = db.users.find((item) => item.id === payment.tenantId);
-          return `<div class="activity-item">
-            <div class="activity-icon green">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-            </div>
-            <div class="activity-content">
-              <p class="activity-text"><strong>${escapeHtml(tenant ? tenant.fullName || tenant.email : "Unknown tenant")}</strong> submitted ${formatCurrency(payment.amount)}</p>
-              <p class="activity-text" style="color:var(--text-secondary);">${escapeHtml(payment.note || "No note added")}</p>
-              <span class="activity-time">${escapeHtml(payment.status)} • ${formatDateTime(payment.createdAt)}</span>
-            </div>
-          </div>`;
-        })
-        .join("")
-    : `<div style="padding:1rem; color:var(--text-secondary);">No payments recorded yet.</div>`;
-  const requestItems = maintenanceRequests.length
-    ? maintenanceRequests
-        .slice(0, 6)
-        .map((request) => {
-          const tenant = db.users.find((item) => item.id === request.tenantId);
-          return `<div class="activity-item">
-            <div class="activity-icon orange">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-            </div>
-            <div class="activity-content">
-              <p class="activity-text"><strong>${escapeHtml(request.title)}</strong> from ${escapeHtml(tenant ? tenant.fullName || tenant.email : "Unknown tenant")}</p>
-              <p class="activity-text" style="color:var(--text-secondary);">${escapeHtml(request.description)}</p>
-              <span class="activity-time">${escapeHtml(request.status)} • ${formatDateTime(request.createdAt)}</span>
-            </div>
-          </div>`;
-        })
-        .join("")
-    : `<div style="padding:1rem; color:var(--text-secondary);">No maintenance requests yet.</div>`;
   const shell = renderShellChrome({
     user,
     roleLabel: "Admin Dashboard",
@@ -1180,50 +984,34 @@ function adminDashboardView(user, db, flash = "") {
           </div>
         </div>
 
-        <div class="two-col">
-          <div class="card">
-            <div class="card-header">
-              <div>
-                <h3 class="card-title">Lodge Snapshot</h3>
-                <p class="card-subtitle">A quick read on the property today</p>
-              </div>
-            </div>
-            <div style="padding: 1rem 1.25rem; display: grid; gap: 1rem;">
-              <div>
-                <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
-                  <span>Tenant accounts</span>
-                  <strong>${tenants.length}</strong>
-                </div>
-                <div class="progress-bar"><div class="progress-fill accent" style="width: ${percentage(tenants.length, totalUnits)}%;"></div></div>
-              </div>
-              <div>
-                <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
-                  <span>Occupied units</span>
-                  <strong>${occupiedUnits}</strong>
-                </div>
-                <div class="progress-bar"><div class="progress-fill success" style="width: ${occupancyRate}%;"></div></div>
-              </div>
-              <div>
-                <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
-                  <span>Open items</span>
-                  <strong>${bills.filter((bill) => bill.status !== "paid").length + maintenanceRequests.filter((request) => request.status !== "resolved").length}</strong>
-                </div>
-                <div class="progress-bar"><div class="progress-fill warning" style="width: ${Math.min(100, (bills.filter((bill) => bill.status !== "paid").length + maintenanceRequests.filter((request) => request.status !== "resolved").length) * 10)}%;"></div></div>
-              </div>
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title">Lodge Snapshot</h3>
+              <p class="card-subtitle">A quick read on the property today</p>
             </div>
           </div>
-
-          <div class="card">
-            <div class="card-header">
-              <div>
-                <h3 class="card-title">Recent Activity</h3>
-                <p class="card-subtitle">Latest registrations and sign-ins</p>
+          <div style="padding: 1rem 1.25rem; display: grid; gap: 1rem;">
+            <div>
+              <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
+                <span>Tenant accounts</span>
+                <strong>${tenants.length}</strong>
               </div>
+              <div class="progress-bar"><div class="progress-fill accent" style="width: ${percentage(tenants.length, totalUnits)}%;"></div></div>
             </div>
-            <div class="card-scroll">
-              <div class="card-scroll-inner" style="min-width: 340px;">
-                <div class="activity-feed">${activityItems}</div>
+            <div>
+              <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
+                <span>Occupied units</span>
+                <strong>${occupiedUnits}</strong>
               </div>
+              <div class="progress-bar"><div class="progress-fill success" style="width: ${occupancyRate}%;"></div></div>
+            </div>
+            <div>
+              <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
+                <span>Open items</span>
+                <strong>${bills.filter((bill) => bill.status !== "paid").length + maintenanceRequests.filter((request) => request.status !== "resolved").length}</strong>
+              </div>
+              <div class="progress-bar"><div class="progress-fill warning" style="width: ${Math.min(100, (bills.filter((bill) => bill.status !== "paid").length + maintenanceRequests.filter((request) => request.status !== "resolved").length) * 10)}%;"></div></div>
             </div>
           </div>
         </div>
