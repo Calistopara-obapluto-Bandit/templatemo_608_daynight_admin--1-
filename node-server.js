@@ -343,6 +343,11 @@ const server = http.createServer(async (req, res) => {
 
   if (serveStatic(res, pathname)) return;
 
+  if (pathname === "/healthz") {
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    return res.end(JSON.stringify({ ok: true }));
+  }
+
   if (pathname === "/") {
     const user = getCurrentUser(req);
     if (user) {
