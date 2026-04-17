@@ -312,6 +312,8 @@ function layoutPage({ title, activePath, user, roleLabel, navLinks, body, showTh
     navLinks,
     activePath,
     showThemeToggle,
+    showNavLinks: true,
+    showMobileMenu: true,
     logoSub: roleLabel,
   });
 
@@ -326,27 +328,41 @@ function layoutPage({ title, activePath, user, roleLabel, navLinks, body, showTh
   );
 }
 
-function renderShellChrome({ user, roleLabel, navLinks, activePath, showThemeToggle = true, logoSub }) {
+function renderShellChrome({
+  user,
+  roleLabel,
+  navLinks = [],
+  activePath,
+  showThemeToggle = true,
+  showNavLinks = true,
+  showMobileMenu = true,
+  logoSub,
+}) {
   const avatar = escapeHtml((user.fullName || "A").slice(0, 1).toUpperCase());
   const name = escapeHtml(user.fullName || "User");
-  const links = navLinks
-    .map(
-      (item) => `<div class="nav-item">
-        <a href="${item.href}" class="nav-link${activePath === item.href ? " active" : ""}">
-          ${item.icon}
-          ${escapeHtml(item.label)}
-        </a>
-      </div>`
-    )
-    .join("");
-  const mobileLinks = navLinks
-    .map(
-      (item) => `<a href="${item.href}" class="${activePath === item.href ? "active" : ""}">
-        ${item.icon}
-        ${escapeHtml(item.label)}
-      </a>`
-    )
-    .join("");
+  const links = showNavLinks
+    ? navLinks
+        .map(
+          (item) => `<div class="nav-item">
+            <a href="${item.href}" class="nav-link${activePath === item.href ? " active" : ""}">
+              ${item.icon}
+              ${escapeHtml(item.label)}
+            </a>
+          </div>`
+        )
+        .join("")
+    : "";
+  const mobileLinks = showMobileMenu
+    ? navLinks
+        .map(
+          (item) => `<a href="${item.href}" class="${activePath === item.href ? "active" : ""}">
+            ${item.icon}
+            ${escapeHtml(item.label)}
+          </a>`
+        )
+        .join("")
+    : "";
+  const navMenu = showNavLinks ? `<div class="nav-menu">${links}</div>` : "";
   const themeToggle = showThemeToggle
     ? `<div class="theme-toggle">
         <button class="theme-btn theme-btn-snow active" onclick="setTheme('snow')" title="Snow Edition">
@@ -358,7 +374,8 @@ function renderShellChrome({ user, roleLabel, navLinks, activePath, showThemeTog
       </div>`
     : "";
   const dashboardPath = user.role === "admin" ? "/admin/dashboard" : "/tenant/dashboard";
-  const mobileMenu = `<div class="mobile-menu-overlay"></div>
+  const mobileMenu = showMobileMenu
+    ? `<div class="mobile-menu-overlay"></div>
       <div class="mobile-menu">
         <div class="mobile-menu-header">
           <a href="${dashboardPath}" class="logo">
@@ -385,16 +402,15 @@ function renderShellChrome({ user, roleLabel, navLinks, activePath, showThemeTog
           </a>
           ${themeToggle}
         </div>
-      </div>`;
+      </div>`
+    : "";
   const topNav = `<nav class="top-nav">
         <div class="nav-container">
           <div class="nav-left">
             <a href="${dashboardPath}" class="logo">
               <div class="logo-icon logo-mark">GT</div><div class="logo-text"><div class="logo-name">Godstime Lodge</div><div class="logo-sub">${escapeHtml(logoSub || roleLabel)}</div></div>
             </a>
-            <div class="nav-menu">
-              ${links}
-            </div>
+            ${navMenu}
           </div>
           <div class="nav-right">
             ${themeToggle}
@@ -405,13 +421,13 @@ function renderShellChrome({ user, roleLabel, navLinks, activePath, showThemeTog
             <a href="/logout" class="btn-logout" title="Logout">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
             </a>
-            <button class="mobile-menu-btn" onclick="toggleMobileMenu()">
+            ${showMobileMenu ? `<button class="mobile-menu-btn" onclick="toggleMobileMenu()">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <line x1="3" y1="12" x2="21" y2="12"/>
                 <line x1="3" y1="6" x2="21" y2="6"/>
                 <line x1="3" y1="18" x2="21" y2="18"/>
               </svg>
-            </button>
+            </button>` : ""}
           </div>
         </div>
       </nav>`;
@@ -613,6 +629,8 @@ function tenantDashboardView(user, db, flash = "") {
     navLinks: tenantNavLinks(),
     activePath: "/tenant/dashboard",
     showThemeToggle: true,
+    showNavLinks: false,
+    showMobileMenu: false,
     logoSub: "Tenant Billing",
   });
 
@@ -1239,6 +1257,8 @@ function adminDashboardView(user, db, flash = "") {
     navLinks: adminNavLinks(),
     activePath: "/admin/dashboard",
     showThemeToggle: true,
+    showNavLinks: false,
+    showMobileMenu: false,
     logoSub: "Admin Dashboard",
   });
 
