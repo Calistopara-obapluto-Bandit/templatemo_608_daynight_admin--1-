@@ -79,6 +79,7 @@ If you remove the disk, the app falls back to the local ./data folder again.
 
 Production notes:
   - The server now exposes /healthz and checks that the data directory/database are readable.
+  - Sessions are stored in the same persistent data file, so logins survive service restarts.
   - Startup logs no longer print the admin password.
   - Keep ADMIN_PASSWORD set to a strong secret in Render before first launch.
 

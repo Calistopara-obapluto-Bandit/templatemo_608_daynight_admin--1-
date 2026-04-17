@@ -14,6 +14,7 @@ const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || "admin123");
 const IS_DEFAULT_ADMIN_PASSWORD = ADMIN_PASSWORD === "admin123";
 const COOKIE_SECURE = String(process.env.COOKIE_SECURE || "").toLowerCase() === "true";
 const MAX_BODY_SIZE = 1024 * 1024;
+const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const DB_PATH = path.join(DATA_DIR, "node-db.json");
 const PUBLIC_DIR = path.join(__dirname, "public");
 const ASSETS_DIR = path.join(PUBLIC_DIR, "assets");
@@ -47,6 +48,23 @@ function createUser({ email, password, role, fullName, unit }) {
   };
 }
 
+function createSession(userId) {
+  const now = Date.now();
+  return {
+    id: randomId(18),
+    userId,
+    createdAt: new Date(now).toISOString(),
+    expiresAt: new Date(now + SESSION_TTL_MS).toISOString(),
+  };
+}
+
+function normalizeDb(db) {
+  return {
+    users: Array.isArray(db && db.users) ? db.users : [],
+    sessions: Array.isArray(db && db.sessions) ? db.sessions : [],
+  };
+}
+
 function loadDb() {
   ensureDataDir();
   if (!fs.existsSync(DB_PATH)) {
@@ -57,18 +75,16 @@ function loadDb() {
       fullName: "Admin",
       unit: "",
     });
-    const db = { users: [admin] };
+    const db = { users: [admin], sessions: [] };
     fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), "utf8");
   }
-  return JSON.parse(fs.readFileSync(DB_PATH, "utf8"));
+  return normalizeDb(JSON.parse(fs.readFileSync(DB_PATH, "utf8")));
 }
 
 function saveDb(db) {
   ensureDataDir();
-  fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), "utf8");
+  fs.writeFileSync(DB_PATH, JSON.stringify(normalizeDb(db), null, 2), "utf8");
 }
-
-const sessions = new Map(); // sessionId -> userId
 
 function parseCookies(req) {
   const header = req.headers.cookie || "";
@@ -87,9 +103,16 @@ function getCurrentUser(req) {
   const cookies = parseCookies(req);
   const sid = cookies.gtl_session;
   if (!sid) return null;
-  const userId = sessions.get(sid);
-  if (!userId) return null;
   const db = loadDb();
+  const now = Date.now();
+  const activeSessions = db.sessions.filter((session) => Date.parse(session.expiresAt) > now);
+  if (activeSessions.length !== db.sessions.length) {
+    db.sessions = activeSessions;
+    saveDb(db);
+  }
+  const session = activeSessions.find((item) => item.id === sid);
+  if (!session) return null;
+  const userId = session.userId;
   return db.users.find((u) => u.id === userId) || null;
 }
 
@@ -103,6 +126,26 @@ function buildSessionCookie(sid, maxAge = null) {
   if (COOKIE_SECURE) parts.push("Secure");
   if (maxAge !== null) parts.push(`Max-Age=${maxAge}`);
   return parts.join("; ");
+}
+
+function persistSession(userId) {
+  const db = loadDb();
+  const session = createSession(userId);
+  const now = Date.now();
+  db.sessions = db.sessions.filter((item) => item.userId !== userId && Date.parse(item.expiresAt) > now);
+  db.sessions.push(session);
+  saveDb(db);
+  return session;
+}
+
+function destroySession(sessionId) {
+  if (!sessionId) return;
+  const db = loadDb();
+  const nextSessions = db.sessions.filter((session) => session.id !== sessionId);
+  if (nextSessions.length !== db.sessions.length) {
+    db.sessions = nextSessions;
+    saveDb(db);
+  }
 }
 
 function send(res, status, body, headers = {}) {
@@ -164,9 +207,12 @@ function applySecurityHeaders(res) {
 function checkHealth() {
   ensureDataDir();
   const db = loadDb();
+  const now = Date.now();
+  const activeSessions = db.sessions.filter((session) => Date.parse(session.expiresAt) > now);
   return {
     ok: true,
     users: Array.isArray(db.users) ? db.users.length : 0,
+    sessions: activeSessions.length,
   };
 }
 
@@ -415,9 +461,8 @@ const server = http.createServer(async (req, res) => {
       const hash = pbkdf2Hash(password, user.saltHex);
       if (hash !== user.passwordHash) return send(res, 401, loginView("Invalid email or password."));
 
-      const sid = randomId(18);
-      sessions.set(sid, user.id);
-      res.setHeader("Set-Cookie", buildSessionCookie(sid));
+      const session = persistSession(user.id);
+      res.setHeader("Set-Cookie", buildSessionCookie(session.id, Math.floor(SESSION_TTL_MS / 1000)));
       return redirect(res, "/");
     }
 
@@ -440,9 +485,8 @@ const server = http.createServer(async (req, res) => {
       db.users.push(tenant);
       saveDb(db);
 
-      const sid = randomId(18);
-      sessions.set(sid, tenant.id);
-      res.setHeader("Set-Cookie", buildSessionCookie(sid));
+      const session = persistSession(tenant.id);
+      res.setHeader("Set-Cookie", buildSessionCookie(session.id, Math.floor(SESSION_TTL_MS / 1000)));
       return redirect(res, "/tenant/dashboard");
     }
 
@@ -450,7 +494,7 @@ const server = http.createServer(async (req, res) => {
       if (method !== "GET" && method !== "POST") return sendText(res, 405, "Method Not Allowed", { Allow: "GET, POST" });
       const cookies = parseCookies(req);
       const sid = cookies.gtl_session;
-      if (sid) sessions.delete(sid);
+      destroySession(sid);
       res.setHeader("Set-Cookie", buildSessionCookie("", 0));
       return redirect(res, "/login");
     }
