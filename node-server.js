@@ -345,7 +345,37 @@ function registerView(error = "") {
   );
 }
 
-function tenantDashboardView(user) {
+function tenantDashboardView(user, db) {
+  const totalUnits = 25;
+  const tenants = db.users.filter((item) => item.role === "tenant");
+  const occupiedUnits = new Set(tenants.map((tenant) => tenant.unit).filter(Boolean)).size;
+  const occupancyRate = percentage(occupiedUnits, totalUnits);
+  const activeSessions = db.sessions.filter((session) => Date.parse(session.expiresAt) > Date.now());
+  const currentSession = activeSessions.find((session) => session.userId === user.id) || null;
+  const joinedDate = formatDateOnly(user.createdAt);
+  const lastAccess = currentSession ? formatDateTime(currentSession.createdAt) : "No active session found";
+  const neighbors = tenants
+    .filter((tenant) => tenant.id !== user.id && tenant.unit)
+    .slice(0, 4);
+  const neighborItems = neighbors.length
+    ? neighbors
+        .map(
+          (tenant) => `<div class="activity-item">
+            <div class="activity-icon blue">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/>
+              </svg>
+            </div>
+            <div class="activity-content">
+              <p class="activity-text"><strong>${escapeHtml(tenant.fullName || tenant.email)}</strong></p>
+              <p class="activity-text" style="color: var(--text-secondary);">Unit ${escapeHtml(tenant.unit)}</p>
+              <span class="activity-time">Joined ${formatDateOnly(tenant.createdAt)}</span>
+            </div>
+          </div>`
+        )
+        .join("")
+    : `<div style="padding: 1rem; color: var(--text-secondary);">As more tenants register, they will show up here.</div>`;
+
   return htmlPage(
     "Tenant Dashboard - Godstime Lodge",
     `<div class="app-container">
@@ -380,17 +410,109 @@ function tenantDashboardView(user) {
       <main class="main-content">
         <div class="page-header">
           <h1 class="greeting">Welcome, ${escapeHtml(user.fullName)}</h1>
-          <p class="greeting-sub">Unit: <strong>${escapeHtml(user.unit || "")}</strong></p>
+          <p class="greeting-sub">Your account is live for <strong>${escapeHtml(user.unit || "Unit not assigned yet")}</strong>.</p>
         </div>
-        <div class="card">
-          <div class="card-header">
-            <div>
-              <h3 class="card-title">Your Dashboard</h3>
-              <p class="card-subtitle">This is a backend-protected tenant page.</p>
+
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label">My Unit</div>
+            <div class="stat-value">${escapeHtml(user.unit || "Pending")}</div>
+            <div class="stat-change positive">Keep this updated with management</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Joined</div>
+            <div class="stat-value">${escapeHtml(joinedDate)}</div>
+            <div class="stat-change positive">Your tenant account creation date</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Last Sign In</div>
+            <div class="stat-value" style="font-size: 1.1rem;">${escapeHtml(lastAccess)}</div>
+            <div class="stat-change positive">Current active session information</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Lodge Occupancy</div>
+            <div class="stat-value">${occupancyRate}%</div>
+            <div class="stat-change">${occupiedUnits} of ${totalUnits} units assigned</div>
+          </div>
+        </div>
+
+        <div class="two-col">
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h3 class="card-title">My Account</h3>
+                <p class="card-subtitle">Your current tenant profile details</p>
+              </div>
+            </div>
+            <div style="padding: 1rem 1.25rem; display:grid; gap:0.9rem; color: var(--text-primary);">
+              <div><strong>Full Name:</strong> ${escapeHtml(user.fullName || "Not set")}</div>
+              <div><strong>Email:</strong> ${escapeHtml(user.email)}</div>
+              <div><strong>Unit:</strong> ${escapeHtml(user.unit || "Not assigned")}</div>
+              <div><strong>Role:</strong> Tenant</div>
+              <div><strong>Access:</strong> Protected by login</div>
             </div>
           </div>
-          <div style="padding: 1rem; color: var(--text-secondary);">
-            Next: we will connect real bills, payments, and requests to this account.
+
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h3 class="card-title">What You Can Do Next</h3>
+                <p class="card-subtitle">Your portal is ready for the next features</p>
+              </div>
+            </div>
+            <div style="padding: 1rem 1.25rem; color: var(--text-secondary); display:grid; gap:0.85rem;">
+              <div>Your tenant login is active and stored by the backend.</div>
+              <div>Once bills are added, this page can show balances, due dates, and payment status.</div>
+              <div>We can also add maintenance requests and payment receipt uploads here.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="two-col" style="margin-top: 1.5rem;">
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h3 class="card-title">Community Snapshot</h3>
+                <p class="card-subtitle">Other recently registered tenants</p>
+              </div>
+            </div>
+            <div class="card-scroll">
+              <div class="card-scroll-inner" style="min-width: 340px;">
+                <div class="activity-feed">${neighborItems}</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h3 class="card-title">Portal Progress</h3>
+                <p class="card-subtitle">What is already working today</p>
+              </div>
+            </div>
+            <div style="padding: 1rem 1.25rem; display: grid; gap: 1rem;">
+              <div>
+                <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
+                  <span>Account setup</span>
+                  <strong>100%</strong>
+                </div>
+                <div class="progress-bar"><div class="progress-fill success" style="width: 100%;"></div></div>
+              </div>
+              <div>
+                <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
+                  <span>Unit assignment</span>
+                  <strong>${user.unit ? "100%" : "40%"}</strong>
+                </div>
+                <div class="progress-bar"><div class="progress-fill accent" style="width: ${user.unit ? 100 : 40}%;"></div></div>
+              </div>
+              <div>
+                <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
+                  <span>Billing features</span>
+                  <strong>0%</strong>
+                </div>
+                <div class="progress-bar"><div class="progress-fill warning" style="width: 0%;"></div></div>
+              </div>
+            </div>
           </div>
         </div>
       </main>
@@ -761,7 +883,8 @@ const server = http.createServer(async (req, res) => {
     if (pathname === "/tenant/dashboard") {
       const user = requireRole(req, res, "tenant");
       if (!user) return;
-      return send(res, 200, tenantDashboardView(user));
+      const db = loadDb();
+      return send(res, 200, tenantDashboardView(user, db));
     }
 
     if (pathname === "/admin/dashboard") {
