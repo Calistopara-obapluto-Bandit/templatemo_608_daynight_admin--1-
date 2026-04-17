@@ -2021,6 +2021,13 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, tenantDashboardView(user, db, String(url.searchParams.get("message") || "")));
     }
 
+    if (pathname === "/tenant/analytics") {
+      const user = requireRole(req, res, "tenant");
+      if (!user) return;
+      const db = loadDb();
+      return send(res, 200, tenantAnalyticsPage(user, db, String(url.searchParams.get("message") || "")));
+    }
+
     if (pathname === "/tenant/bills") {
       const user = requireRole(req, res, "tenant");
       if (!user) return;
@@ -2079,6 +2086,13 @@ const server = http.createServer(async (req, res) => {
       if (!user) return;
       const db = loadDb();
       return send(res, 200, adminDashboardView(user, db, String(url.searchParams.get("message") || "")));
+    }
+
+    if (pathname === "/admin/analytics") {
+      const user = requireRole(req, res, "admin");
+      if (!user) return;
+      const db = loadDb();
+      return send(res, 200, adminAnalyticsPage(user, db, String(url.searchParams.get("message") || "")));
     }
 
     if (pathname === "/admin/bills") {
