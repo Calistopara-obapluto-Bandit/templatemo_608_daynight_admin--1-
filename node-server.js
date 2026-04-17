@@ -318,6 +318,14 @@ function layoutPage({ title, activePath, user, roleLabel, navLinks, body, showTh
       </div>`
     )
     .join("");
+  const mobileLinks = navLinks
+    .map(
+      (item) => `<a href="${item.href}" class="${activePath === item.href ? "active" : ""}">
+        ${item.icon}
+        ${escapeHtml(item.label)}
+      </a>`
+    )
+    .join("");
   const themeToggle = showThemeToggle
     ? `<div class="theme-toggle">
         <button class="theme-btn theme-btn-snow active" onclick="setTheme('snow')" title="Snow Edition">
@@ -332,6 +340,34 @@ function layoutPage({ title, activePath, user, roleLabel, navLinks, body, showTh
   return htmlPage(
     title,
     `<div class="app-container">
+      <div class="mobile-menu-overlay"></div>
+      <div class="mobile-menu">
+        <div class="mobile-menu-header">
+          <a href="/${user.role === "admin" ? "admin" : "tenant"}/dashboard" class="logo">
+            <div class="logo-icon logo-mark">GT</div><div class="logo-text"><div class="logo-name">Godstime Lodge</div><div class="logo-sub">${escapeHtml(roleLabel)}</div></div>
+          </a>
+          <button class="mobile-menu-close" onclick="closeMobileMenu()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"/>
+              <line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+        <nav class="mobile-menu-nav">
+          ${mobileLinks}
+        </nav>
+        <div class="mobile-menu-footer">
+          <a href="/logout" class="mobile-logout-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+              <polyline points="16 17 21 12 16 7"/>
+              <line x1="21" y1="12" x2="9" y2="12"/>
+            </svg>
+            Logout
+          </a>
+          ${themeToggle}
+        </div>
+      </div>
       <nav class="top-nav">
         <div class="nav-container">
           <div class="nav-left">
@@ -351,6 +387,13 @@ function layoutPage({ title, activePath, user, roleLabel, navLinks, body, showTh
             <a href="/logout" class="btn-logout" title="Logout">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
             </a>
+            <button class="mobile-menu-btn" onclick="toggleMobileMenu()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="3" y1="12" x2="21" y2="12"/>
+                <line x1="3" y1="6" x2="21" y2="6"/>
+                <line x1="3" y1="18" x2="21" y2="18"/>
+              </svg>
+            </button>
           </div>
         </div>
       </nav>
