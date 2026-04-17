@@ -837,6 +837,14 @@ input, select, textarea {
     flex: 1;
 }
 
+.activity-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.25rem;
+}
+
 .activity-text {
     font-size: 0.875rem;
     color: var(--text-primary);
@@ -850,6 +858,11 @@ input, select, textarea {
 .activity-time {
     font-size: 0.75rem;
     color: var(--text-secondary);
+}
+
+.activity-badge {
+    flex-shrink: 0;
+    margin-top: 0.1rem;
 }
 
 /* ===== Two Column Layout ===== */

@@ -5,7 +5,8 @@
   "description": "Node web app for Godstime Lodge tenant billing demo.",
   "main": "node-server.js",
   "scripts": {
-    "start": "node node-server.js"
+    "start": "node node-server.js",
+    "test": "node --check node-server.js"
   },
   "engines": {
     "node": ">=18"

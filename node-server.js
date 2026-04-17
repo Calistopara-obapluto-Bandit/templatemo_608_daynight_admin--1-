@@ -434,13 +434,16 @@ function renderShellChrome({
   return { mobileMenu, topNav };
 }
 
-function renderActivityItem({ tone = "blue", iconSvg, title, detail, time }) {
+function renderActivityItem({ tone = "blue", iconSvg, title, detail, time, badge = "", badgeTone = tone }) {
   return `<div class="activity-item">
     <div class="activity-icon ${tone}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${iconSvg}</svg>
     </div>
     <div class="activity-content">
-      <p class="activity-text"><strong>${escapeHtml(title)}</strong></p>
+      <div class="activity-head">
+        <p class="activity-text"><strong>${escapeHtml(title)}</strong></p>
+        ${badge ? `<span class="badge badge-${escapeHtml(badgeTone)} activity-badge">${escapeHtml(badge)}</span>` : ""}
+      </div>
       <p class="activity-text" style="color: var(--text-secondary);">${escapeHtml(detail)}</p>
       <span class="activity-time">${escapeHtml(time)}</span>
     </div>
@@ -569,6 +572,8 @@ function tenantDashboardView(user, db, flash = "") {
         title: "Signed in",
         detail: "Your current session is active",
         time: formatDateTime(currentSession.createdAt),
+        badge: "Live",
+        badgeTone: "green",
       })
     );
   }
@@ -580,6 +585,8 @@ function tenantDashboardView(user, db, flash = "") {
         title: bills[0].title,
         detail: `Bill added for ${formatCurrency(bills[0].amount)}`,
         time: formatDateTime(bills[0].createdAt),
+        badge: bills[0].status,
+        badgeTone: bills[0].status === "paid" ? "green" : bills[0].status === "overdue" ? "red" : "blue",
       })
     );
   }
@@ -591,6 +598,8 @@ function tenantDashboardView(user, db, flash = "") {
         title: bills[1].title,
         detail: `Bill added for ${formatCurrency(bills[1].amount)}`,
         time: formatDateTime(bills[1].createdAt),
+        badge: bills[1].status,
+        badgeTone: bills[1].status === "paid" ? "green" : bills[1].status === "overdue" ? "red" : "blue",
       })
     );
   }
@@ -602,6 +611,8 @@ function tenantDashboardView(user, db, flash = "") {
         title: "Payment submitted",
         detail: `${formatCurrency(payments[0].amount)} is ${payments[0].status}`,
         time: formatDateTime(payments[0].createdAt),
+        badge: payments[0].status,
+        badgeTone: payments[0].status === "approved" ? "green" : payments[0].status === "rejected" ? "red" : "orange",
       })
     );
   }
@@ -613,6 +624,8 @@ function tenantDashboardView(user, db, flash = "") {
         title: "Another payment",
         detail: `${formatCurrency(payments[1].amount)} is ${payments[1].status}`,
         time: formatDateTime(payments[1].createdAt),
+        badge: payments[1].status,
+        badgeTone: payments[1].status === "approved" ? "green" : payments[1].status === "rejected" ? "red" : "orange",
       })
     );
   }
@@ -624,6 +637,8 @@ function tenantDashboardView(user, db, flash = "") {
         title: requests[0].title,
         detail: `Maintenance request is ${requests[0].status}`,
         time: formatDateTime(requests[0].createdAt),
+        badge: requests[0].status,
+        badgeTone: requests[0].status === "resolved" ? "green" : requests[0].status === "in-progress" ? "orange" : "blue",
       })
     );
   }
@@ -635,6 +650,8 @@ function tenantDashboardView(user, db, flash = "") {
         title: requests[1].title,
         detail: `Maintenance request is ${requests[1].status}`,
         time: formatDateTime(requests[1].createdAt),
+        badge: requests[1].status,
+        badgeTone: requests[1].status === "resolved" ? "green" : requests[1].status === "in-progress" ? "orange" : "blue",
       })
     );
   }
@@ -913,6 +930,11 @@ function tenantNavLinks() {
       icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0 1 13 0"/></svg>',
     },
     {
+      href: "/tenant/analytics",
+      label: "Analytics",
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 19 4 5 20 5"/><polyline points="7 16 11 12 14 15 20 9"/></svg>',
+    },
+    {
       href: "/tenant/bills",
       label: "Bills",
       icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="13" y2="15"/></svg>',
@@ -1010,12 +1032,163 @@ function tenantAccountPage(user, db, flash = "") {
   });
 }
 
+function tenantAnalyticsPage(user, db, flash = "") {
+  const bills = db.bills
+    .filter((bill) => bill.tenantId === user.id)
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const payments = db.payments
+    .filter((payment) => payment.tenantId === user.id)
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const requests = db.maintenanceRequests
+    .filter((request) => request.tenantId === user.id)
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const totalDue = bills.filter((bill) => bill.status !== "paid").reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
+  const approvedPayments = payments.filter((payment) => payment.status === "approved");
+  const openRequests = requests.filter((request) => request.status !== "resolved");
+  const paidBills = bills.filter((bill) => bill.status === "paid").length;
+  const recentActivity = [];
+  if (bills[0]) {
+    recentActivity.push(renderActivityItem({
+      tone: "blue",
+      iconSvg: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="13" y2="15"/>',
+      title: bills[0].title,
+      detail: `${formatCurrency(bills[0].amount)} • ${bills[0].status}`,
+      time: formatDateTime(bills[0].createdAt),
+      badge: bills[0].status,
+      badgeTone: bills[0].status === "paid" ? "green" : bills[0].status === "overdue" ? "red" : "blue",
+    }));
+  }
+  if (payments[0]) {
+    recentActivity.push(renderActivityItem({
+      tone: "green",
+      iconSvg: '<path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+      title: "Payment activity",
+      detail: `${formatCurrency(payments[0].amount)} • ${payments[0].status}`,
+      time: formatDateTime(payments[0].createdAt),
+      badge: payments[0].status,
+      badgeTone: payments[0].status === "approved" ? "green" : payments[0].status === "rejected" ? "red" : "orange",
+    }));
+  }
+  if (requests[0]) {
+    recentActivity.push(renderActivityItem({
+      tone: "orange",
+      iconSvg: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+      title: requests[0].title,
+      detail: `Maintenance is ${requests[0].status}`,
+      time: formatDateTime(requests[0].createdAt),
+      badge: requests[0].status,
+      badgeTone: requests[0].status === "resolved" ? "green" : requests[0].status === "in-progress" ? "orange" : "blue",
+    }));
+  }
+
+  return layoutPage({
+    title: "Analytics - Godstime Lodge",
+    activePath: "/tenant/analytics",
+    user,
+    roleLabel: "Tenant Portal",
+    navLinks: tenantNavLinks(),
+    body: `<main class="main-content">
+      ${sectionHeader("Analytics", "Track your bills, payments, and maintenance in one place.", flash)}
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-label">Bills</div><div class="stat-value">${bills.length}</div><div class="stat-change positive">${paidBills} paid, ${bills.length - paidBills} unpaid</div></div>
+        <div class="stat-card"><div class="stat-label">Payments</div><div class="stat-value">${payments.length}</div><div class="stat-change positive">${approvedPayments.length} approved</div></div>
+        <div class="stat-card"><div class="stat-label">Open Requests</div><div class="stat-value">${openRequests.length}</div><div class="stat-change positive">${requests.length} total maintenance tickets</div></div>
+        <div class="stat-card"><div class="stat-label">Outstanding</div><div class="stat-value">${formatCurrency(totalDue)}</div><div class="stat-change positive">Remaining balance</div></div>
+      </div>
+      <div class="card" style="margin-top: 1.5rem;">
+        <div class="card-header">
+          <div>
+            <h3 class="card-title">Next Actions</h3>
+            <p class="card-subtitle">Fast links for the tasks you do most</p>
+          </div>
+        </div>
+        <div style="padding: 1rem 1.25rem; display:flex; gap:0.75rem; flex-wrap:wrap;">
+          <a class="btn btn-primary" href="/tenant/payments">Submit Payment</a>
+          <a class="btn btn-secondary" href="/tenant/bills">View Bills</a>
+          <a class="btn btn-secondary" href="/tenant/requests">Report Issue</a>
+        </div>
+      </div>
+      <div class="two-col">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title">Payment Health</h3>
+              <p class="card-subtitle">How far you are in clearing bills</p>
+            </div>
+          </div>
+          <div style="padding: 1rem 1.25rem; display:grid; gap:1rem;">
+            <div>
+              <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;"><span>Paid bills</span><strong>${paidBills}/${bills.length || 1}</strong></div>
+              <div class="progress-bar"><div class="progress-fill success" style="width: ${percentage(paidBills, bills.length || 1)}%;"></div></div>
+            </div>
+            <div>
+              <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;"><span>Approved payments</span><strong>${approvedPayments.length}</strong></div>
+              <div class="progress-bar"><div class="progress-fill accent" style="width: ${percentage(approvedPayments.length, payments.length || 1)}%;"></div></div>
+            </div>
+            <div>
+              <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;"><span>Open maintenance</span><strong>${openRequests.length}</strong></div>
+              <div class="progress-bar"><div class="progress-fill warning" style="width: ${Math.min(100, openRequests.length * 25)}%;"></div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title">Bill Timeline</h3>
+              <p class="card-subtitle">Recent bills and their status</p>
+            </div>
+          </div>
+          <div class="card-scroll">
+            <div class="card-scroll-inner" style="min-width: 360px;">
+              <div class="activity-feed">${
+                bills.length
+                  ? bills
+                      .slice(0, 5)
+                      .map((bill) => renderActivityItem({
+                        tone: bill.status === "paid" ? "green" : "blue",
+                        iconSvg: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="13" y2="15"/>',
+                        title: bill.title,
+                        detail: `${formatCurrency(bill.amount)} • ${escapeHtml(bill.status)}`,
+                        time: formatDateTime(bill.createdAt),
+                        badge: bill.status,
+                        badgeTone: bill.status === "paid" ? "green" : bill.status === "overdue" ? "red" : "blue",
+                      }))
+                      .join("")
+                  : `<div style="padding:1rem; color:var(--text-secondary);">Bills will appear here once management creates them.</div>`
+              }</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="margin-top: 1.5rem;">
+        <div class="card-header">
+          <div>
+            <h3 class="card-title">Recent Activity</h3>
+            <p class="card-subtitle">Latest lodge updates tied to your account</p>
+          </div>
+        </div>
+        <div class="card-scroll">
+          <div class="card-scroll-inner" style="min-width: 340px;">
+            <div class="activity-feed">${renderActivityFeed(recentActivity, "Activity will show up here as you start using the portal.")}</div>
+          </div>
+        </div>
+      </div>
+    </main>`,
+  });
+}
+
 function adminNavLinks() {
   return [
     {
       href: "/admin/dashboard",
       label: "Dashboard",
       icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>',
+    },
+    {
+      href: "/admin/analytics",
+      label: "Analytics",
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 19 4 5 20 5"/><polyline points="7 16 11 12 14 15 20 9"/></svg>',
     },
     {
       href: "/admin/bills",
@@ -1059,6 +1232,8 @@ function adminDashboardView(user, db, flash = "") {
         title: `${tenants[0].fullName || tenants[0].email} registered`,
         detail: tenants[0].unit ? `Unit ${tenants[0].unit}` : "Unit not assigned yet",
         time: formatDateTime(tenants[0].createdAt),
+        badge: "New",
+        badgeTone: "blue",
       })
     );
   }
@@ -1070,6 +1245,8 @@ function adminDashboardView(user, db, flash = "") {
         title: `${tenants[1].fullName || tenants[1].email} registered`,
         detail: tenants[1].unit ? `Unit ${tenants[1].unit}` : "Unit not assigned yet",
         time: formatDateTime(tenants[1].createdAt),
+        badge: "New",
+        badgeTone: "blue",
       })
     );
   }
@@ -1082,6 +1259,8 @@ function adminDashboardView(user, db, flash = "") {
         title: bills[0].title,
         detail: `${formatCurrency(bills[0].amount)} for ${tenant ? tenant.fullName || tenant.email : "Unknown tenant"}`,
         time: formatDateTime(bills[0].createdAt),
+        badge: bills[0].status,
+        badgeTone: bills[0].status === "paid" ? "green" : bills[0].status === "overdue" ? "red" : "blue",
       })
     );
   }
@@ -1094,6 +1273,8 @@ function adminDashboardView(user, db, flash = "") {
         title: bills[1].title,
         detail: `${formatCurrency(bills[1].amount)} for ${tenant ? tenant.fullName || tenant.email : "Unknown tenant"}`,
         time: formatDateTime(bills[1].createdAt),
+        badge: bills[1].status,
+        badgeTone: bills[1].status === "paid" ? "green" : bills[1].status === "overdue" ? "red" : "blue",
       })
     );
   }
@@ -1106,6 +1287,8 @@ function adminDashboardView(user, db, flash = "") {
         title: `${tenant ? tenant.fullName || tenant.email : "Tenant"} payment`,
         detail: `${formatCurrency(payments[0].amount)} is ${payments[0].status}`,
         time: formatDateTime(payments[0].createdAt),
+        badge: payments[0].status,
+        badgeTone: payments[0].status === "approved" ? "green" : payments[0].status === "rejected" ? "red" : "orange",
       })
     );
   }
@@ -1118,6 +1301,8 @@ function adminDashboardView(user, db, flash = "") {
         title: `${tenant ? tenant.fullName || tenant.email : "Tenant"} payment`,
         detail: `${formatCurrency(payments[1].amount)} is ${payments[1].status}`,
         time: formatDateTime(payments[1].createdAt),
+        badge: payments[1].status,
+        badgeTone: payments[1].status === "approved" ? "green" : payments[1].status === "rejected" ? "red" : "orange",
       })
     );
   }
@@ -1130,6 +1315,8 @@ function adminDashboardView(user, db, flash = "") {
         title: maintenanceRequests[0].title,
         detail: `From ${tenant ? tenant.fullName || tenant.email : "Unknown tenant"} • ${maintenanceRequests[0].status}`,
         time: formatDateTime(maintenanceRequests[0].createdAt),
+        badge: maintenanceRequests[0].status,
+        badgeTone: maintenanceRequests[0].status === "resolved" ? "green" : maintenanceRequests[0].status === "in-progress" ? "orange" : "blue",
       })
     );
   }
@@ -1142,6 +1329,8 @@ function adminDashboardView(user, db, flash = "") {
         title: maintenanceRequests[1].title,
         detail: `From ${tenant ? tenant.fullName || tenant.email : "Unknown tenant"} • ${maintenanceRequests[1].status}`,
         time: formatDateTime(maintenanceRequests[1].createdAt),
+        badge: maintenanceRequests[1].status,
+        badgeTone: maintenanceRequests[1].status === "resolved" ? "green" : maintenanceRequests[1].status === "in-progress" ? "orange" : "blue",
       })
     );
   }
@@ -1154,6 +1343,8 @@ function adminDashboardView(user, db, flash = "") {
         title: `${sessionUser ? sessionUser.fullName || sessionUser.email : "User"} signed in`,
         detail: sessionUser && sessionUser.role === "admin" ? "Administrator session" : "Tenant session",
         time: formatDateTime(activeSessions[0].createdAt),
+        badge: "Live",
+        badgeTone: "green",
       })
     );
   }
@@ -1166,6 +1357,8 @@ function adminDashboardView(user, db, flash = "") {
         title: `${sessionUser ? sessionUser.fullName || sessionUser.email : "User"} signed in`,
         detail: sessionUser && sessionUser.role === "admin" ? "Administrator session" : "Tenant session",
         time: formatDateTime(activeSessions[1].createdAt),
+        badge: "Live",
+        badgeTone: "green",
       })
     );
   }
@@ -1267,6 +1460,235 @@ function adminDashboardView(user, db, flash = "") {
       <footer class="footer"><p>&copy; 2026 Sbiam Solutions. All rights reserved.</p></footer>
     </div>`
   );
+}
+
+function adminAnalyticsPage(user, db, flash = "") {
+  const totalUnits = 25;
+  const tenants = db.users
+    .filter((item) => item.role === "tenant")
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const activeSessions = db.sessions
+    .filter((session) => Date.parse(session.expiresAt) > Date.now())
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const occupiedUnits = new Set(tenants.map((tenant) => tenant.unit).filter(Boolean)).size;
+  const occupancyRate = percentage(occupiedUnits, totalUnits);
+  const bills = db.bills.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const payments = db.payments.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const requests = db.maintenanceRequests.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  const outstandingBills = bills.filter((bill) => bill.status !== "paid");
+  const approvedPayments = payments.filter((payment) => payment.status === "approved");
+  const pendingPayments = payments.filter((payment) => payment.status === "pending");
+  const openRequests = requests.filter((request) => request.status !== "resolved");
+  const resolvedRequests = requests.filter((request) => request.status === "resolved");
+  const recentActivity = [];
+  if (tenants[0]) {
+    recentActivity.push(renderActivityItem({
+      tone: "blue",
+      iconSvg: '<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/>',
+      title: `${tenants[0].fullName || tenants[0].email} registered`,
+      detail: tenants[0].unit ? `Unit ${tenants[0].unit}` : "Unit not assigned yet",
+      time: formatDateTime(tenants[0].createdAt),
+      badge: "New",
+      badgeTone: "blue",
+    }));
+  }
+  if (tenants[1]) {
+    recentActivity.push(renderActivityItem({
+      tone: "blue",
+      iconSvg: '<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/>',
+      title: `${tenants[1].fullName || tenants[1].email} registered`,
+      detail: tenants[1].unit ? `Unit ${tenants[1].unit}` : "Unit not assigned yet",
+      time: formatDateTime(tenants[1].createdAt),
+      badge: "New",
+      badgeTone: "blue",
+    }));
+  }
+  if (bills[0]) {
+    const tenant = db.users.find((item) => item.id === bills[0].tenantId);
+    recentActivity.push(renderActivityItem({
+      tone: "blue",
+      iconSvg: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="13" y2="15"/>',
+      title: bills[0].title,
+      detail: `${formatCurrency(bills[0].amount)} for ${tenant ? tenant.fullName || tenant.email : "Unknown tenant"}`,
+      time: formatDateTime(bills[0].createdAt),
+      badge: bills[0].status,
+      badgeTone: bills[0].status === "paid" ? "green" : bills[0].status === "overdue" ? "red" : "blue",
+    }));
+  }
+  if (bills[1]) {
+    const tenant = db.users.find((item) => item.id === bills[1].tenantId);
+    recentActivity.push(renderActivityItem({
+      tone: "blue",
+      iconSvg: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="13" y2="15"/>',
+      title: bills[1].title,
+      detail: `${formatCurrency(bills[1].amount)} for ${tenant ? tenant.fullName || tenant.email : "Unknown tenant"}`,
+      time: formatDateTime(bills[1].createdAt),
+      badge: bills[1].status,
+      badgeTone: bills[1].status === "paid" ? "green" : bills[1].status === "overdue" ? "red" : "blue",
+    }));
+  }
+  if (payments[0]) {
+    const tenant = db.users.find((item) => item.id === payments[0].tenantId);
+    recentActivity.push(renderActivityItem({
+      tone: "green",
+      iconSvg: '<path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+      title: `${tenant ? tenant.fullName || tenant.email : "Tenant"} payment`,
+      detail: `${formatCurrency(payments[0].amount)} • ${payments[0].status}`,
+      time: formatDateTime(payments[0].createdAt),
+      badge: payments[0].status,
+      badgeTone: payments[0].status === "approved" ? "green" : payments[0].status === "rejected" ? "red" : "orange",
+    }));
+  }
+  if (payments[1]) {
+    const tenant = db.users.find((item) => item.id === payments[1].tenantId);
+    recentActivity.push(renderActivityItem({
+      tone: "green",
+      iconSvg: '<path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+      title: `${tenant ? tenant.fullName || tenant.email : "Tenant"} payment`,
+      detail: `${formatCurrency(payments[1].amount)} • ${payments[1].status}`,
+      time: formatDateTime(payments[1].createdAt),
+      badge: payments[1].status,
+      badgeTone: payments[1].status === "approved" ? "green" : payments[1].status === "rejected" ? "red" : "orange",
+    }));
+  }
+  if (requests[0]) {
+    const tenant = db.users.find((item) => item.id === requests[0].tenantId);
+    recentActivity.push(renderActivityItem({
+      tone: "orange",
+      iconSvg: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+      title: requests[0].title,
+      detail: `From ${tenant ? tenant.fullName || tenant.email : "Unknown tenant"} • ${requests[0].status}`,
+      time: formatDateTime(requests[0].createdAt),
+      badge: requests[0].status,
+      badgeTone: requests[0].status === "resolved" ? "green" : requests[0].status === "in-progress" ? "orange" : "blue",
+    }));
+  }
+  if (requests[1]) {
+    const tenant = db.users.find((item) => item.id === requests[1].tenantId);
+    recentActivity.push(renderActivityItem({
+      tone: "orange",
+      iconSvg: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+      title: requests[1].title,
+      detail: `From ${tenant ? tenant.fullName || tenant.email : "Unknown tenant"} • ${requests[1].status}`,
+      time: formatDateTime(requests[1].createdAt),
+      badge: requests[1].status,
+      badgeTone: requests[1].status === "resolved" ? "green" : requests[1].status === "in-progress" ? "orange" : "blue",
+    }));
+  }
+  if (activeSessions[0]) {
+    const sessionUser = db.users.find((item) => item.id === activeSessions[0].userId);
+    recentActivity.push(renderActivityItem({
+      tone: "green",
+      iconSvg: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
+      title: `${sessionUser ? sessionUser.fullName || sessionUser.email : "User"} signed in`,
+      detail: sessionUser && sessionUser.role === "admin" ? "Administrator session" : "Tenant session",
+      time: formatDateTime(activeSessions[0].createdAt),
+      badge: "Live",
+      badgeTone: "green",
+    }));
+  }
+  if (activeSessions[1]) {
+    const sessionUser = db.users.find((item) => item.id === activeSessions[1].userId);
+    recentActivity.push(renderActivityItem({
+      tone: "green",
+      iconSvg: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
+      title: `${sessionUser ? sessionUser.fullName || sessionUser.email : "User"} signed in`,
+      detail: sessionUser && sessionUser.role === "admin" ? "Administrator session" : "Tenant session",
+      time: formatDateTime(activeSessions[1].createdAt),
+      badge: "Live",
+      badgeTone: "green",
+    }));
+  }
+
+  return layoutPage({
+    title: "Analytics - Godstime Lodge",
+    activePath: "/admin/analytics",
+    user,
+    roleLabel: "Admin Dashboard",
+    navLinks: adminNavLinks(),
+    body: `<main class="main-content">
+      ${sectionHeader("Analytics", "A deeper look at bills, payments, occupancy, and maintenance.", flash)}
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-label">Tenants</div><div class="stat-value">${tenants.length}</div><div class="stat-change positive">${occupiedUnits} occupied units</div></div>
+        <div class="stat-card"><div class="stat-label">Occupancy</div><div class="stat-value">${occupancyRate}%</div><div class="stat-change positive">${occupiedUnits}/${totalUnits} units in use</div></div>
+        <div class="stat-card"><div class="stat-label">Outstanding Bills</div><div class="stat-value">${outstandingBills.length}</div><div class="stat-change positive">${formatCurrency(outstandingBills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0))}</div></div>
+        <div class="stat-card"><div class="stat-label">Approved Payments</div><div class="stat-value">${approvedPayments.length}</div><div class="stat-change positive">${pendingPayments.length} pending payments</div></div>
+      </div>
+      <div class="card" style="margin-top:1.5rem;">
+        <div class="card-header">
+          <div>
+            <h3 class="card-title">Fast Actions</h3>
+            <p class="card-subtitle">Jump straight to the operational pages</p>
+          </div>
+        </div>
+        <div style="padding: 1rem 1.25rem; display:flex; gap:0.75rem; flex-wrap:wrap;">
+          <a href="/admin/bills" class="btn btn-primary">Bills</a>
+          <a href="/admin/payments" class="btn btn-secondary">Payments</a>
+          <a href="/admin/maintenance" class="btn btn-secondary">Maintenance</a>
+        </div>
+      </div>
+      <div class="two-col">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title">Collections</h3>
+              <p class="card-subtitle">Bill and payment health</p>
+            </div>
+          </div>
+          <div style="padding: 1rem 1.25rem; display:grid; gap:1rem;">
+            <div>
+              <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;"><span>Paid bills</span><strong>${bills.filter((bill) => bill.status === "paid").length}</strong></div>
+              <div class="progress-bar"><div class="progress-fill success" style="width: ${percentage(bills.filter((bill) => bill.status === "paid").length, bills.length || 1)}%;"></div></div>
+            </div>
+            <div>
+              <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;"><span>Approved payments</span><strong>${approvedPayments.length}</strong></div>
+              <div class="progress-bar"><div class="progress-fill accent" style="width: ${percentage(approvedPayments.length, payments.length || 1)}%;"></div></div>
+            </div>
+            <div>
+              <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;"><span>Pending payments</span><strong>${pendingPayments.length}</strong></div>
+              <div class="progress-bar"><div class="progress-fill warning" style="width: ${Math.min(100, pendingPayments.length * 20)}%;"></div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title">Operations</h3>
+              <p class="card-subtitle">Maintenance and service workload</p>
+            </div>
+          </div>
+          <div style="padding: 1rem 1.25rem; display:grid; gap:1rem;">
+            <div>
+              <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;"><span>Open requests</span><strong>${openRequests.length}</strong></div>
+              <div class="progress-bar"><div class="progress-fill warning" style="width: ${Math.min(100, openRequests.length * 20)}%;"></div></div>
+            </div>
+            <div>
+              <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;"><span>Resolved requests</span><strong>${resolvedRequests.length}</strong></div>
+              <div class="progress-bar"><div class="progress-fill success" style="width: ${percentage(resolvedRequests.length, requests.length || 1)}%;"></div></div>
+            </div>
+            <div>
+              <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;"><span>Live sessions</span><strong>${activeSessions.length}</strong></div>
+              <div class="progress-bar"><div class="progress-fill accent" style="width: ${Math.min(100, activeSessions.length * 15)}%;"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:1.5rem;">
+        <div class="card-header">
+          <div>
+            <h3 class="card-title">Recent Activity</h3>
+            <p class="card-subtitle">Live events across the lodge</p>
+          </div>
+        </div>
+        <div class="card-scroll">
+          <div class="card-scroll-inner" style="min-width:340px;">
+            <div class="activity-feed">${renderActivityFeed(recentActivity, "Activity will appear here as the lodge starts moving.")}</div>
+          </div>
+        </div>
+      </div>
+    </main>`,
+  });
 }
 
 function adminBillsPage(user, db, flash = "") {
