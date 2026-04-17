@@ -306,6 +306,27 @@ function htmlPage(title, inner) {
 }
 
 function layoutPage({ title, activePath, user, roleLabel, navLinks, body, showThemeToggle = true }) {
+  const shell = renderShellChrome({
+    user,
+    roleLabel,
+    navLinks,
+    activePath,
+    showThemeToggle,
+    logoSub: roleLabel,
+  });
+
+  return htmlPage(
+    title,
+    `<div class="app-container">
+      ${shell.mobileMenu}
+      ${shell.topNav}
+      ${body}
+      <footer class="footer"><p>&copy; 2026 Sbiam Solutions. All rights reserved.</p></footer>
+    </div>`
+  );
+}
+
+function renderShellChrome({ user, roleLabel, navLinks, activePath, showThemeToggle = true, logoSub }) {
   const avatar = escapeHtml((user.fullName || "A").slice(0, 1).toUpperCase());
   const name = escapeHtml(user.fullName || "User");
   const links = navLinks
@@ -336,15 +357,12 @@ function layoutPage({ title, activePath, user, roleLabel, navLinks, body, showTh
         </button>
       </div>`
     : "";
-
-  return htmlPage(
-    title,
-    `<div class="app-container">
-      <div class="mobile-menu-overlay"></div>
+  const dashboardPath = user.role === "admin" ? "/admin/dashboard" : "/tenant/dashboard";
+  const mobileMenu = `<div class="mobile-menu-overlay"></div>
       <div class="mobile-menu">
         <div class="mobile-menu-header">
-          <a href="/${user.role === "admin" ? "admin" : "tenant"}/dashboard" class="logo">
-            <div class="logo-icon logo-mark">GT</div><div class="logo-text"><div class="logo-name">Godstime Lodge</div><div class="logo-sub">${escapeHtml(roleLabel)}</div></div>
+          <a href="${dashboardPath}" class="logo">
+            <div class="logo-icon logo-mark">GT</div><div class="logo-text"><div class="logo-name">Godstime Lodge</div><div class="logo-sub">${escapeHtml(logoSub || roleLabel)}</div></div>
           </a>
           <button class="mobile-menu-close" onclick="closeMobileMenu()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -367,12 +385,12 @@ function layoutPage({ title, activePath, user, roleLabel, navLinks, body, showTh
           </a>
           ${themeToggle}
         </div>
-      </div>
-      <nav class="top-nav">
+      </div>`;
+  const topNav = `<nav class="top-nav">
         <div class="nav-container">
           <div class="nav-left">
-            <a href="/${user.role === "admin" ? "admin" : "tenant"}/dashboard" class="logo">
-              <div class="logo-icon logo-mark">GT</div><div class="logo-text"><div class="logo-name">Godstime Lodge</div><div class="logo-sub">${escapeHtml(roleLabel)}</div></div>
+            <a href="${dashboardPath}" class="logo">
+              <div class="logo-icon logo-mark">GT</div><div class="logo-text"><div class="logo-name">Godstime Lodge</div><div class="logo-sub">${escapeHtml(logoSub || roleLabel)}</div></div>
             </a>
             <div class="nav-menu">
               ${links}
@@ -396,11 +414,8 @@ function layoutPage({ title, activePath, user, roleLabel, navLinks, body, showTh
             </button>
           </div>
         </div>
-      </nav>
-      ${body}
-      <footer class="footer"><p>&copy; 2026 Sbiam Solutions. All rights reserved.</p></footer>
-    </div>`
-  );
+      </nav>`;
+  return { mobileMenu, topNav };
 }
 
 function sectionHeader(title, subtitle, message = "") {
@@ -592,70 +607,20 @@ function tenantDashboardView(user, db, flash = "") {
         .map((bill) => `<option value="${escapeHtml(bill.id)}">${escapeHtml(bill.title)} - ${formatCurrency(bill.amount)}</option>`)
         .join("")
     : `<option value="">No bill selected</option>`;
+  const shell = renderShellChrome({
+    user,
+    roleLabel: "Tenant Billing",
+    navLinks: tenantNavLinks(),
+    activePath: "/tenant/dashboard",
+    showThemeToggle: true,
+    logoSub: "Tenant Billing",
+  });
 
   return htmlPage(
     "Tenant Dashboard - Godstime Lodge",
     `<div class="app-container">
-      <nav class="top-nav">
-        <div class="nav-container">
-          <div class="nav-left">
-            <a href="/tenant/dashboard" class="logo">
-              <div class="logo-icon logo-mark">GT</div><div class="logo-text"><div class="logo-name">Godstime Lodge</div><div class="logo-sub">Tenant Billing</div></div>
-            </a>
-            <div class="nav-menu">
-              <div class="nav-item">
-                <a href="/tenant/dashboard" class="nav-link active">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0 1 13 0"/>
-                  </svg>
-                  Dashboard
-                </a>
-              </div>
-              <div class="nav-item">
-                <a href="/tenant/bills" class="nav-link">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="13" y2="15"/>
-                  </svg>
-                  Bills
-                </a>
-              </div>
-              <div class="nav-item">
-                <a href="/tenant/payments" class="nav-link">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
-                  </svg>
-                  Payments
-                </a>
-              </div>
-              <div class="nav-item">
-                <a href="/tenant/requests" class="nav-link">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                  </svg>
-                  Maintenance
-                </a>
-              </div>
-              <div class="nav-item">
-                <a href="/tenant/account" class="nav-link">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4z"/><path d="M4 21a8 8 0 0 1 16 0"/>
-                  </svg>
-                  Account
-                </a>
-              </div>
-            </div>
-          </div>
-          <div class="nav-right">
-            <button class="user-menu">
-              <div class="user-avatar">${escapeHtml(user.fullName.slice(0, 1).toUpperCase())}</div>
-              <span class="user-name">${escapeHtml(user.fullName)}</span>
-            </button>
-            <a href="/logout" class="btn-logout" title="Logout">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-            </a>
-          </div>
-        </div>
-      </nav>
+      ${shell.mobileMenu}
+      ${shell.topNav}
       <main class="main-content">
         ${flashBanner}
         <div class="page-header">
@@ -1282,70 +1247,20 @@ function adminDashboardView(user, db, flash = "") {
         })
         .join("")
     : `<div style="padding:1rem; color:var(--text-secondary);">No maintenance requests yet.</div>`;
+  const shell = renderShellChrome({
+    user,
+    roleLabel: "Admin Dashboard",
+    navLinks: adminNavLinks(),
+    activePath: "/admin/dashboard",
+    showThemeToggle: true,
+    logoSub: "Admin Dashboard",
+  });
 
   return htmlPage(
     "Admin Dashboard - Godstime Lodge",
     `<div class="app-container">
-      <nav class="top-nav">
-        <div class="nav-container">
-          <div class="nav-left">
-            <a href="/admin/dashboard" class="logo">
-              <div class="logo-icon logo-mark">GT</div><div class="logo-text"><div class="logo-name">Godstime Lodge</div><div class="logo-sub">Admin Dashboard</div></div>
-            </a>
-            <div class="nav-menu">
-              <div class="nav-item">
-                <a href="/admin/dashboard" class="nav-link active">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
-                  </svg>
-                  Dashboard
-                </a>
-              </div>
-              <div class="nav-item">
-                <a href="/admin/bills" class="nav-link">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="13" y2="15"/>
-                  </svg>
-                  Bills
-                </a>
-              </div>
-              <div class="nav-item">
-                <a href="/admin/payments" class="nav-link">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
-                  </svg>
-                  Payments
-                </a>
-              </div>
-              <div class="nav-item">
-                <a href="/admin/maintenance" class="nav-link">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                  </svg>
-                  Maintenance
-                </a>
-              </div>
-            </div>
-          </div>
-          <div class="nav-right">
-            <div class="theme-toggle">
-              <button class="theme-btn theme-btn-snow active" onclick="setTheme('snow')" title="Snow Edition">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-              </button>
-              <button class="theme-btn theme-btn-carbon" onclick="setTheme('carbon')" title="Carbon Edition">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-              </button>
-            </div>
-            <button class="user-menu">
-              <div class="user-avatar">${escapeHtml((user.fullName || "A").slice(0, 1).toUpperCase())}</div>
-              <span class="user-name">${escapeHtml(user.fullName || "Admin")}</span>
-            </button>
-            <a href="/logout" class="btn-logout" title="Logout">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-            </a>
-          </div>
-        </div>
-      </nav>
+      ${shell.mobileMenu}
+      ${shell.topNav}
       <main class="main-content">
         ${flashBanner}
         <div class="page-header">
