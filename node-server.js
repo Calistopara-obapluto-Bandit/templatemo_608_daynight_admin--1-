@@ -562,6 +562,26 @@ function renderActivityFeed(items, emptyMessage) {
   return items.length ? items.join("") : `<div style="padding:1rem; color:var(--text-secondary);">${escapeHtml(emptyMessage)}</div>`;
 }
 
+function renderAnnouncementCard(message, title = "Announcement") {
+  if (!String(message || "").trim()) return "";
+  return `<div class="card" style="margin-bottom:1.5rem; border-color: rgba(56, 189, 248, 0.24); background: linear-gradient(135deg, rgba(56,189,248,0.10), rgba(34,197,94,0.06));">
+    <div class="card-header">
+      <div>
+        <h3 class="card-title">${escapeHtml(title)}</h3>
+        <p class="card-subtitle">Latest update from management</p>
+      </div>
+      <span class="badge badge-blue">Live</span>
+    </div>
+    <div style="padding: 0 1.25rem 1.25rem; color: var(--text-primary);">${escapeHtml(message)}</div>
+  </div>`;
+}
+
+function matchesSearch(values, query) {
+  const needle = String(query || "").trim().toLowerCase();
+  if (!needle) return true;
+  return values.some((value) => String(value || "").toLowerCase().includes(needle));
+}
+
 function sectionHeader(title, subtitle, message = "") {
   const banner = message
     ? `<div class="alert" style="margin-bottom:1rem; padding:0.9rem 1rem; border:1px solid var(--border); border-radius:16px; background:rgba(34,197,94,0.08); color:var(--text-primary);">${escapeHtml(message)}</div>`
@@ -783,6 +803,7 @@ function tenantDashboardView(user, db, flash = "") {
       ${shell.topNav}
       <main class="main-content">
         ${flashBanner}
+        ${renderAnnouncementCard(db.settings.announcement, "Lodge Update")}
         <div class="page-header">
           <h1 class="greeting">Welcome, ${escapeHtml(user.fullName)}</h1>
           <p class="greeting-sub">Your account is live for <strong>${escapeHtml(user.unit || "Unit not assigned yet")}</strong>.</p>
@@ -991,6 +1012,7 @@ function tenantMaintenancePage(user, db, flash = "") {
   const requests = db.maintenanceRequests
     .filter((request) => request.tenantId === user.id)
     .sort(compareNewestFirst);
+  const resolvedRequests = requests.filter((request) => request.status === "resolved");
   const items = requests.length
     ? requests.map((request) => renderActivityItem({
         tone: "orange",
@@ -1011,6 +1033,7 @@ function tenantMaintenancePage(user, db, flash = "") {
     navLinks: tenantNavLinks(),
     body: `<main class="main-content">
       ${sectionHeader("Maintenance Requests", "Send issues to management and track the status here.", flash)}
+      ${renderAnnouncementCard(db.settings.announcement, "Service Notice")}
       <div class="two-col">
         <div class="card">
           <div class="card-header"><div><h3 class="card-title">New Request</h3><p class="card-subtitle">Tell management what needs attention</p></div></div>
@@ -1024,6 +1047,21 @@ function tenantMaintenancePage(user, db, flash = "") {
           <div class="card-header"><div><h3 class="card-title">Request History</h3><p class="card-subtitle">Your maintenance tickets</p></div></div>
           <div class="card-scroll"><div class="card-scroll-inner" style="min-width: 340px;"><div class="activity-feed">${items}</div></div></div>
         </div>
+      </div>
+      <div class="card" style="margin-top:1.5rem;">
+        <div class="card-header"><div><h3 class="card-title">Completed Work</h3><p class="card-subtitle">This is how tenants can see what has been done</p></div></div>
+        <div class="card-scroll"><div class="card-scroll-inner" style="min-width: 340px;"><div class="activity-feed">${renderActivityFeed(
+          resolvedRequests.map((request) => renderActivityItem({
+            tone: "green",
+            iconSvg: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
+            title: request.title,
+            detail: "Marked resolved by management",
+            time: formatDateTime(request.createdAt),
+            badge: "done",
+            badgeTone: "green",
+          })),
+          "When management resolves a request, it will show here."
+        )}</div></div></div>
       </div>
     </main>`,
   });
@@ -1788,8 +1826,13 @@ function adminAnalyticsPage(user, db, flash = "") {
   });
 }
 
-function adminProjectsPage(user, db, flash = "") {
-  const projects = [...db.projects].sort(compareNewestFirst);
+function adminProjectsPage(user, db, flash = "", filters = {}) {
+  const query = normalizeLine(filters.q, 80);
+  const statusFilter = normalizeLine(filters.status, 20);
+  const projects = [...db.projects]
+    .filter((project) => !statusFilter || project.status === statusFilter)
+    .filter((project) => matchesSearch([project.title, project.description, project.owner], query))
+    .sort(compareNewestFirst);
   const activeProjects = projects.filter((project) => project.status === "active");
   const completedProjects = projects.filter((project) => project.status === "completed");
   const plannedProjects = projects.filter((project) => project.status === "planned");
@@ -1825,6 +1868,19 @@ function adminProjectsPage(user, db, flash = "") {
         <div class="stat-card"><div class="stat-label">Planned</div><div class="stat-value">${plannedProjects.length}</div><div class="stat-change positive">Waiting to begin</div></div>
         <div class="stat-card"><div class="stat-label">Active</div><div class="stat-value">${activeProjects.length}</div><div class="stat-change positive">In progress now</div></div>
         <div class="stat-card"><div class="stat-label">Completed</div><div class="stat-value">${completedProjects.length}</div><div class="stat-change positive">Finished projects</div></div>
+      </div>
+      <div class="card" style="margin-bottom:1.5rem;">
+        <div class="card-header"><div><h3 class="card-title">Find Projects</h3><p class="card-subtitle">Search by title, owner, or description</p></div></div>
+        <form method="get" action="/admin/projects" style="padding:1rem 1.25rem; display:grid; gap:0.85rem; grid-template-columns: 2fr 1fr auto;">
+          <input name="q" type="text" class="form-input" value="${escapeHtml(query)}" placeholder="Search projects" />
+          <select name="status" class="form-input">
+            <option value="">All statuses</option>
+            <option value="planned" ${statusFilter === "planned" ? "selected" : ""}>Planned</option>
+            <option value="active" ${statusFilter === "active" ? "selected" : ""}>Active</option>
+            <option value="completed" ${statusFilter === "completed" ? "selected" : ""}>Completed</option>
+          </select>
+          <button type="submit" class="btn btn-primary">Filter</button>
+        </form>
       </div>
       <div class="two-col">
         <div class="card">
@@ -1908,9 +1964,17 @@ function adminSettingsPage(user, db, flash = "") {
   });
 }
 
-function adminBillsPage(user, db, flash = "") {
+function adminBillsPage(user, db, flash = "", filters = {}) {
+  const query = normalizeLine(filters.q, 80);
+  const statusFilter = normalizeLine(filters.status, 20);
   const tenants = db.users.filter((item) => item.role === "tenant");
-  const bills = [...db.bills].sort(compareNewestFirst);
+  const bills = [...db.bills]
+    .filter((bill) => !statusFilter || getBillStatus(bill) === statusFilter)
+    .filter((bill) => {
+      const tenant = db.users.find((item) => item.id === bill.tenantId);
+      return matchesSearch([bill.title, bill.dueDate, tenant ? tenant.fullName : "", tenant ? tenant.email : ""], query);
+    })
+    .sort(compareNewestFirst);
   const billTenantOptions = tenants.length
     ? tenants
         .map((tenant) => `<option value="${escapeHtml(tenant.id)}">${escapeHtml((tenant.fullName || tenant.email) + (tenant.unit ? ` - ${tenant.unit}` : ""))}</option>`)
@@ -1939,6 +2003,19 @@ function adminBillsPage(user, db, flash = "") {
     navLinks: adminNavLinks(),
     body: `<main class="main-content">
       ${sectionHeader("Bills", "Create and review lodge charges from one page.", flash)}
+      <div class="card" style="margin-bottom:1.5rem;">
+        <div class="card-header"><div><h3 class="card-title">Find Bills</h3><p class="card-subtitle">Search by bill title or tenant and filter by status</p></div></div>
+        <form method="get" action="/admin/bills" style="padding:1rem 1.25rem; display:grid; gap:0.85rem; grid-template-columns: 2fr 1fr auto;">
+          <input name="q" type="text" class="form-input" value="${escapeHtml(query)}" placeholder="Search bills or tenants" />
+          <select name="status" class="form-input">
+            <option value="">All statuses</option>
+            <option value="unpaid" ${statusFilter === "unpaid" ? "selected" : ""}>Unpaid</option>
+            <option value="overdue" ${statusFilter === "overdue" ? "selected" : ""}>Overdue</option>
+            <option value="paid" ${statusFilter === "paid" ? "selected" : ""}>Paid</option>
+          </select>
+          <button type="submit" class="btn btn-primary">Filter</button>
+        </form>
+      </div>
       <div class="two-col">
         <div class="card">
           <div class="card-header"><div><h3 class="card-title">Create Bill</h3><p class="card-subtitle">Assign a charge to a tenant</p></div></div>
@@ -1982,8 +2059,17 @@ function adminBillsPage(user, db, flash = "") {
   });
 }
 
-function adminPaymentsPage(user, db, flash = "") {
-  const payments = [...db.payments].sort(compareNewestFirst);
+function adminPaymentsPage(user, db, flash = "", filters = {}) {
+  const query = normalizeLine(filters.q, 80);
+  const statusFilter = normalizeLine(filters.status, 20);
+  const payments = [...db.payments]
+    .filter((payment) => !statusFilter || payment.status === statusFilter)
+    .filter((payment) => {
+      const tenant = db.users.find((item) => item.id === payment.tenantId);
+      const bill = db.bills.find((item) => item.id === payment.billId);
+      return matchesSearch([tenant ? tenant.fullName : "", tenant ? tenant.email : "", bill ? bill.title : "", payment.note], query);
+    })
+    .sort(compareNewestFirst);
   const rows = payments.length
     ? payments
         .map((payment) => {
@@ -2021,6 +2107,19 @@ function adminPaymentsPage(user, db, flash = "") {
         <div class="stat-card"><div class="stat-label">Approved</div><div class="stat-value">${payments.filter((payment) => payment.status === "approved").length}</div><div class="stat-change positive">Already confirmed</div></div>
         <div class="stat-card"><div class="stat-label">Total Value</div><div class="stat-value">${formatCurrency(payments.reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0))}</div><div class="stat-change positive">All payment submissions</div></div>
       </div>
+      <div class="card" style="margin-bottom:1.5rem;">
+        <div class="card-header"><div><h3 class="card-title">Find Payments</h3><p class="card-subtitle">Search by tenant, bill, or reference note</p></div></div>
+        <form method="get" action="/admin/payments" style="padding:1rem 1.25rem; display:grid; gap:0.85rem; grid-template-columns: 2fr 1fr auto;">
+          <input name="q" type="text" class="form-input" value="${escapeHtml(query)}" placeholder="Search payments" />
+          <select name="status" class="form-input">
+            <option value="">All statuses</option>
+            <option value="pending" ${statusFilter === "pending" ? "selected" : ""}>Pending</option>
+            <option value="approved" ${statusFilter === "approved" ? "selected" : ""}>Approved</option>
+            <option value="rejected" ${statusFilter === "rejected" ? "selected" : ""}>Rejected</option>
+          </select>
+          <button type="submit" class="btn btn-primary">Filter</button>
+        </form>
+      </div>
       <div class="card">
         <div class="card-header"><div><h3 class="card-title">Payment Review Queue</h3><p class="card-subtitle">Approve or reject each submission</p></div></div>
         <div class="card-scroll">
@@ -2044,8 +2143,16 @@ function adminPaymentsPage(user, db, flash = "") {
   });
 }
 
-function adminMaintenancePage(user, db, flash = "") {
-  const requests = [...db.maintenanceRequests].sort(compareNewestFirst);
+function adminMaintenancePage(user, db, flash = "", filters = {}) {
+  const query = normalizeLine(filters.q, 80);
+  const statusFilter = normalizeLine(filters.status, 20);
+  const requests = [...db.maintenanceRequests]
+    .filter((request) => !statusFilter || request.status === statusFilter)
+    .filter((request) => {
+      const tenant = db.users.find((item) => item.id === request.tenantId);
+      return matchesSearch([request.title, request.description, tenant ? tenant.fullName : "", tenant ? tenant.email : ""], query);
+    })
+    .sort(compareNewestFirst);
   const rows = requests.length
     ? requests
         .map((request) => {
@@ -2081,6 +2188,19 @@ function adminMaintenancePage(user, db, flash = "") {
         <div class="stat-card"><div class="stat-label">Open</div><div class="stat-value">${requests.filter((request) => request.status === "open").length}</div><div class="stat-change positive">Waiting to be handled</div></div>
         <div class="stat-card"><div class="stat-label">In Progress</div><div class="stat-value">${requests.filter((request) => request.status === "in-progress").length}</div><div class="stat-change positive">Being worked on</div></div>
         <div class="stat-card"><div class="stat-label">Resolved</div><div class="stat-value">${requests.filter((request) => request.status === "resolved").length}</div><div class="stat-change positive">Closed tickets</div></div>
+      </div>
+      <div class="card" style="margin-bottom:1.5rem;">
+        <div class="card-header"><div><h3 class="card-title">Find Requests</h3><p class="card-subtitle">Search by tenant, issue title, or description</p></div></div>
+        <form method="get" action="/admin/maintenance" style="padding:1rem 1.25rem; display:grid; gap:0.85rem; grid-template-columns: 2fr 1fr auto;">
+          <input name="q" type="text" class="form-input" value="${escapeHtml(query)}" placeholder="Search maintenance requests" />
+          <select name="status" class="form-input">
+            <option value="">All statuses</option>
+            <option value="open" ${statusFilter === "open" ? "selected" : ""}>Open</option>
+            <option value="in-progress" ${statusFilter === "in-progress" ? "selected" : ""}>In Progress</option>
+            <option value="resolved" ${statusFilter === "resolved" ? "selected" : ""}>Resolved</option>
+          </select>
+          <button type="submit" class="btn btn-primary">Filter</button>
+        </form>
       </div>
       <div class="card">
         <div class="card-header"><div><h3 class="card-title">Maintenance Queue</h3><p class="card-subtitle">Update status for each request</p></div></div>
@@ -2329,7 +2449,10 @@ const server = http.createServer(async (req, res) => {
       if (!user) return;
       const db = loadDb();
       if (method === "GET") {
-        return send(res, 200, adminProjectsPage(user, db, String(url.searchParams.get("message") || "")));
+        return send(res, 200, adminProjectsPage(user, db, String(url.searchParams.get("message") || ""), {
+          q: String(url.searchParams.get("q") || ""),
+          status: String(url.searchParams.get("status") || ""),
+        }));
       }
       if (method !== "POST") return sendText(res, 405, "Method Not Allowed", { Allow: "GET, POST" });
       if (!isFormRequest(req)) return redirectWithMessage(res, "/admin/projects", "Unsupported project submission.");
@@ -2399,7 +2522,10 @@ const server = http.createServer(async (req, res) => {
       if (!user) return;
       const db = loadDb();
       if (method === "GET") {
-        return send(res, 200, adminBillsPage(user, db, String(url.searchParams.get("message") || "")));
+        return send(res, 200, adminBillsPage(user, db, String(url.searchParams.get("message") || ""), {
+          q: String(url.searchParams.get("q") || ""),
+          status: String(url.searchParams.get("status") || ""),
+        }));
       }
       if (method !== "POST") return sendText(res, 405, "Method Not Allowed", { Allow: "GET, POST" });
       if (!isFormRequest(req)) return redirectWithMessage(res, "/admin/bills", "Unsupported bill submission.");
@@ -2426,7 +2552,10 @@ const server = http.createServer(async (req, res) => {
       if (!user) return;
       const db = loadDb();
       if (method === "GET") {
-        return send(res, 200, adminPaymentsPage(user, db, String(url.searchParams.get("message") || "")));
+        return send(res, 200, adminPaymentsPage(user, db, String(url.searchParams.get("message") || ""), {
+          q: String(url.searchParams.get("q") || ""),
+          status: String(url.searchParams.get("status") || ""),
+        }));
       }
       return sendText(res, 405, "Method Not Allowed", { Allow: "GET" });
     }
@@ -2459,7 +2588,10 @@ const server = http.createServer(async (req, res) => {
       if (!user) return;
       const db = loadDb();
       if (method === "GET") {
-        return send(res, 200, adminMaintenancePage(user, db, String(url.searchParams.get("message") || "")));
+        return send(res, 200, adminMaintenancePage(user, db, String(url.searchParams.get("message") || ""), {
+          q: String(url.searchParams.get("q") || ""),
+          status: String(url.searchParams.get("status") || ""),
+        }));
       }
       return sendText(res, 405, "Method Not Allowed", { Allow: "GET" });
     }
