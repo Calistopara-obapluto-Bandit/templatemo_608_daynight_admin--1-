@@ -2111,6 +2111,57 @@ tr:hover td {
     text-transform: uppercase;
 }
 
+.mobile-menu-quick {
+    margin: 0 0 1rem;
+    padding: 0 0.85rem 0.95rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--border-color) 84%, transparent);
+}
+
+.mobile-menu-quick-label {
+    margin-bottom: 0.7rem;
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.mobile-menu-quick-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.65rem;
+}
+
+.mobile-quick-link {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.55rem;
+    padding: 0.9rem;
+    border-radius: 16px;
+    background: linear-gradient(135deg, color-mix(in srgb, var(--bg-surface) 90%, transparent), color-mix(in srgb, var(--accent-light) 28%, transparent));
+    border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+    color: var(--text-primary);
+    transition: var(--transition);
+}
+
+.mobile-quick-link svg {
+    width: 20px;
+    height: 20px;
+    opacity: 0.8;
+}
+
+.mobile-quick-link span {
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.mobile-quick-link.active {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent-light) 70%, var(--bg-primary));
+    border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
 .mobile-menu-nav a {
     display: flex;
     align-items: center;
@@ -2225,6 +2276,10 @@ tr:hover td {
     justify-content: center;
 }
 
+.mobile-tabbar {
+    display: none;
+}
+
 @media (max-width: 600px) {
     .nav-container {
         padding: 0 0.75rem;
@@ -2257,7 +2312,7 @@ tr:hover td {
     }
 
     .main-content {
-        padding: 1rem 0.75rem;
+        padding: 1rem 0.75rem 5.75rem;
     }
 
     .card {
@@ -2272,10 +2327,62 @@ tr:hover td {
         width: 92vw;
     }
 
+    .mobile-menu-quick {
+        padding: 0 0.35rem 0.95rem;
+    }
+
     .mobile-menu-header,
     .mobile-menu-footer {
         padding-left: 1rem;
         padding-right: 1rem;
+    }
+
+    .mobile-tabbar {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0.35rem;
+        position: fixed;
+        left: 0.75rem;
+        right: 0.75rem;
+        bottom: 0.75rem;
+        padding: 0.45rem;
+        border-radius: 22px;
+        background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+        border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+        box-shadow: 0 18px 36px rgba(15, 23, 42, 0.16);
+        backdrop-filter: blur(18px);
+        z-index: 1200;
+    }
+
+    .mobile-tab-link {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.3rem;
+        min-height: 58px;
+        padding: 0.45rem 0.25rem;
+        border-radius: 16px;
+        color: var(--text-secondary);
+        transition: var(--transition);
+    }
+
+    .mobile-tab-link svg {
+        width: 18px;
+        height: 18px;
+        opacity: 0.8;
+    }
+
+    .mobile-tab-link span {
+        font-size: 0.68rem;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        text-align: center;
+    }
+
+    .mobile-tab-link.active {
+        color: var(--accent);
+        background: color-mix(in srgb, var(--accent-light) 70%, var(--bg-primary));
     }
 }
 

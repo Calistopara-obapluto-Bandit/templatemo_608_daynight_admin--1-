@@ -474,6 +474,7 @@ function layoutPage({ title, activePath, user, roleLabel, navLinks, body, showTh
       ${shell.mobileMenu}
       ${shell.topNav}
       ${body}
+      ${shell.mobileTabBar}
       <footer class="footer"><p>&copy; 2026 Sbiam Solutions. All rights reserved.</p></footer>
     </div>`
   );
@@ -491,6 +492,9 @@ function renderShellChrome({
 }) {
   const avatar = escapeHtml((user.fullName || "A").slice(0, 1).toUpperCase());
   const name = escapeHtml(user.fullName || "User");
+  const tenantQuickLinks = user.role === "tenant"
+    ? navLinks.filter((item) => ["/tenant/dashboard", "/tenant/bills", "/tenant/payments", "/tenant/requests"].includes(item.href))
+    : [];
   const settingsLink = user.role === "admin"
     ? {
         href: "/admin/settings",
@@ -550,6 +554,19 @@ function renderShellChrome({
         )
         .join("")
     : "";
+  const mobileQuickLinks = tenantQuickLinks.length
+    ? `<div class="mobile-menu-quick">
+        <div class="mobile-menu-quick-label">Quick Access</div>
+        <div class="mobile-menu-quick-grid">
+          ${tenantQuickLinks
+            .map((item) => `<a href="${item.href}" class="mobile-quick-link${activePath === item.href ? " active" : ""}">
+              ${item.icon}
+              <span>${escapeHtml(item.label)}</span>
+            </a>`)
+            .join("")}
+        </div>
+      </div>`
+    : "";
   const navMenu = showNavLinks ? `<div class="nav-menu">${links}</div>` : "";
   const themeToggle = showThemeToggle
     ? `<div class="theme-toggle">
@@ -577,6 +594,7 @@ function renderShellChrome({
           </button>
         </div>
         <nav class="mobile-menu-nav">
+          ${mobileQuickLinks}
           ${mobileLinks}
         </nav>
         <div class="mobile-menu-footer">
@@ -643,7 +661,17 @@ function renderShellChrome({
           </div>
         </div>
       </nav>`;
-  return { mobileMenu, topNav };
+  const mobileTabBar = user.role === "tenant" && tenantQuickLinks.length
+    ? `<nav class="mobile-tabbar" aria-label="Tenant quick navigation">
+        ${tenantQuickLinks
+          .map((item) => `<a href="${item.href}" class="mobile-tab-link${activePath === item.href ? " active" : ""}">
+            ${item.icon}
+            <span>${escapeHtml(item.label)}</span>
+          </a>`)
+          .join("")}
+      </nav>`
+    : "";
+  return { mobileMenu, topNav, mobileTabBar };
 }
 
 function renderActivityItem({ tone = "blue", iconSvg, title, detail, time, badge = "", badgeTone = tone }) {
