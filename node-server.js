@@ -50,10 +50,10 @@ function createUser({ email, password, role, fullName, unit }) {
   };
 }
 
-function createTenantInvite({ email, fullName, unit, inviteCode }) {
+function createTenantInvite({ fullName, unit, inviteCode, existingEmails = [] }) {
   return {
     id: randomId(12),
-    email: String(email || "").trim().toLowerCase(),
+    email: generateTenantEmail(fullName, existingEmails),
     fullName: String(fullName || "").trim(),
     unit: String(unit || "").trim(),
     inviteCode: String(inviteCode || "").trim().toUpperCase(),
@@ -139,7 +139,7 @@ function normalizeDb(db) {
     tenantInvites: Array.isArray(db && db.tenantInvites)
       ? db.tenantInvites.map((invite) => ({
           ...invite,
-          email: String(invite.email || "").trim().toLowerCase(),
+          email: String(invite.email || "").trim().toLowerCase() || generateTenantEmail(invite.fullName),
           fullName: normalizeLine(invite.fullName || "", 80),
           unit: normalizeLine(invite.unit || "", 40),
           inviteCode: normalizeInviteCode(invite.inviteCode),
@@ -348,6 +348,24 @@ function isValidDateInput(value) {
 
 function normalizeLine(value, maxLength) {
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, maxLength);
+}
+
+function normalizeNameKey(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function generateTenantEmail(fullName, existingEmails = []) {
+  const base = normalizeNameKey(fullName) || "tenant";
+  const taken = new Set(existingEmails.map((email) => String(email || "").trim().toLowerCase()));
+  let candidate = `${base}.tn@gtlodge.com`;
+  let suffix = 2;
+  while (taken.has(candidate)) {
+    candidate = `${base}${suffix}.tn@gtlodge.com`;
+    suffix += 1;
+  }
+  return candidate;
 }
 
 function normalizeInviteCode(value) {
@@ -781,16 +799,17 @@ function registerView(error = "") {
             <p class="login-subtitle">Only tenants approved by management can register with an invite code.</p>
           </div>
           ${err}
-          <form class="login-form" method="post" action="/register" data-invite-form>
+          <form class="login-form" method="post" action="/register" data-tenant-email-form data-invite-form>
             <div class="form-group">
-              <label class="form-label">Email Address</label>
-              <input name="email" type="email" class="form-input" placeholder="you@example.com" autocomplete="email" data-invite-email required />
+              <label class="form-label">Full Name</label>
+              <input name="full_name" type="text" class="form-input" placeholder="e.g. Adaeze Okafor" autocomplete="name" data-invite-full-name required />
             </div>
             <div class="form-group">
               <label class="form-label">Invite Code</label>
               <input name="invite_code" type="text" class="form-input" maxlength="12" placeholder="Enter the code from management" data-invite-code required />
             </div>
-            <div class="invite-status" data-invite-status aria-live="polite">Enter your approved email and invite code to verify access.</div>
+            <div class="invite-status" data-tenant-email-preview aria-live="polite">Your lodge email will be generated from your name.</div>
+            <div class="invite-status" data-invite-status aria-live="polite">Enter your approved full name and invite code to verify access.</div>
             <div class="form-group">
               <label class="form-label">Password</label>
               <input name="password" type="password" class="form-input" placeholder="Minimum 6 characters" required />
@@ -2042,9 +2061,9 @@ function adminTenantsPage(user, db, flash = "", filters = {}) {
       <div class="two-col">
         <div class="card">
           <div class="card-header"><div><h3 class="card-title">Approve Tenant Access</h3><p class="card-subtitle">Only approved tenants with an invite code can create accounts</p></div></div>
-          <form method="post" action="/admin/tenants/invite" style="padding:1rem 1.25rem; display:grid; gap:0.85rem;">
-            <div class="form-group"><label class="form-label">Full Name</label><input name="full_name" type="text" maxlength="80" class="form-input" placeholder="e.g. Adaeze Okafor" required /></div>
-            <div class="form-group"><label class="form-label">Email Address</label><input name="email" type="email" class="form-input" placeholder="tenant@example.com" required /></div>
+          <form method="post" action="/admin/tenants/invite" data-tenant-email-form style="padding:1rem 1.25rem; display:grid; gap:0.85rem;">
+            <div class="form-group"><label class="form-label">Full Name</label><input name="full_name" type="text" maxlength="80" class="form-input" placeholder="e.g. Adaeze Okafor" data-tenant-email-full-name required /></div>
+            <div class="invite-status" data-tenant-email-preview aria-live="polite">The tenant email will be generated from the full name.</div>
             <div class="form-group"><label class="form-label">Unit</label><input name="unit" type="text" maxlength="40" class="form-input" placeholder="e.g. Block B - 3" /></div>
             <div class="form-group"><label class="form-label">Invite Code</label><input name="invite_code" type="text" maxlength="12" class="form-input" placeholder="Leave empty to auto-generate" /></div>
             <button type="submit" class="btn btn-primary">Create Tenant Invite</button>
@@ -2610,19 +2629,21 @@ const server = http.createServer(async (req, res) => {
       if (!isFormRequest(req)) return send(res, 415, registerView("Unsupported form submission."));
       const body = await readBody(req);
       const form = parseForm(body);
-      const email = String(form.email || "").trim().toLowerCase();
+      const fullName = normalizeLine(form.full_name, 80);
       const inviteCode = normalizeInviteCode(form.invite_code);
       const password = String(form.password || "");
-      if (!email || !inviteCode || !password) return send(res, 400, registerView("Please fill all required fields."));
+      if (!fullName || !inviteCode || !password) return send(res, 400, registerView("Please fill all required fields."));
       if (password.length < 6) return send(res, 400, registerView("Password must be at least 6 characters."));
 
       const db = loadDb();
-      if (db.users.some((u) => u.email === email)) return send(res, 400, registerView("This email is already registered."));
-      const invite = db.tenantInvites.find((item) => item.email === email && item.inviteCode === inviteCode && !item.usedAt);
+      const invite = db.tenantInvites.find((item) => !item.usedAt && item.inviteCode === inviteCode && normalizeNameKey(item.fullName) === normalizeNameKey(fullName));
       if (!invite) {
         return send(res, 403, registerView("Registration is only available for approved tenants with a valid invite code."));
       }
-      const tenant = createUser({ email, password, role: "tenant", fullName: invite.fullName, unit: invite.unit });
+      const email = invite.email || generateTenantEmail(fullName, db.users.map((u) => u.email));
+      if (db.users.some((u) => u.email === email)) return send(res, 400, registerView("This tenant email is already registered."));
+      invite.email = email;
+      const tenant = createUser({ email, password, role: "tenant", fullName: invite.fullName || fullName, unit: invite.unit });
       db.users.push(tenant);
       invite.usedAt = new Date().toISOString();
       saveDb(db);
@@ -2634,23 +2655,25 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname === "/register/invite-status") {
       if (method !== "GET") return sendText(res, 405, "Method Not Allowed", { Allow: "GET" });
-      const email = String(url.searchParams.get("email") || "").trim().toLowerCase();
+      const fullName = normalizeLine(url.searchParams.get("full_name"), 80);
       const inviteCode = normalizeInviteCode(url.searchParams.get("invite_code"));
-      if (!email || !inviteCode) {
-        return sendJson(res, 200, { ok: false, state: "idle", message: "Enter your approved email and invite code to verify access." });
+      if (!fullName || !inviteCode) {
+        return sendJson(res, 200, { ok: false, state: "idle", message: "Enter your approved full name and invite code to verify access." });
       }
       const db = loadDb();
-      if (db.users.some((user) => user.email === email)) {
-        return sendJson(res, 200, { ok: false, state: "used", message: "That email already has an account. Sign in instead." });
-      }
-      const invite = db.tenantInvites.find((item) => item.email === email && item.inviteCode === inviteCode && !item.usedAt);
+      const invite = db.tenantInvites.find((item) => !item.usedAt && item.inviteCode === inviteCode && normalizeNameKey(item.fullName) === normalizeNameKey(fullName));
       if (!invite) {
-        return sendJson(res, 200, { ok: false, state: "invalid", message: "Invite not found. Use the exact approved email and code from management." });
+        return sendJson(res, 200, { ok: false, state: "invalid", message: "Invite not found. Use the exact approved full name and code from management." });
+      }
+      const email = invite.email || generateTenantEmail(fullName, db.users.map((user) => user.email));
+      if (db.users.some((user) => user.email === email)) {
+        return sendJson(res, 200, { ok: false, state: "used", message: "That tenant email already has an account. Sign in instead.", email });
       }
       return sendJson(res, 200, {
         ok: true,
         state: "valid",
-        message: `Invite confirmed for ${invite.fullName || invite.email}${invite.unit ? ` • ${invite.unit}` : ""}.`,
+        email,
+        message: `Invite confirmed for ${invite.fullName || fullName}${invite.unit ? ` • ${invite.unit}` : ""}. Your email will be ${email}.`,
       });
     }
 
@@ -2811,14 +2834,17 @@ const server = http.createServer(async (req, res) => {
       const form = parseForm(body);
       const db = loadDb();
       const fullName = normalizeLine(form.full_name, 80);
-      const email = String(form.email || "").trim().toLowerCase();
       const unit = normalizeLine(form.unit, 40);
       let inviteCode = normalizeInviteCode(form.invite_code);
-      if (!fullName || !email || !email.includes("@")) {
-        return redirectWithMessage(res, "/admin/tenants", "Please enter a valid tenant name and email before approving access.");
+      if (!fullName) {
+        return redirectWithMessage(res, "/admin/tenants", "Please enter a valid tenant name before approving access.");
       }
+      const email = generateTenantEmail(fullName, [
+        ...db.users.map((item) => item.email),
+        ...db.tenantInvites.filter((item) => !item.usedAt).map((item) => item.email),
+      ]);
       if (db.users.some((item) => item.email === email)) {
-        return redirectWithMessage(res, "/admin/tenants", "That email already belongs to a registered user.");
+        return redirectWithMessage(res, "/admin/tenants", "That tenant email already belongs to a registered user.");
       }
       if (db.tenantInvites.some((item) => item.email === email && !item.usedAt)) {
         return redirectWithMessage(res, "/admin/tenants", "That tenant already has a pending invite.");
@@ -2831,9 +2857,12 @@ const server = http.createServer(async (req, res) => {
       if (db.tenantInvites.some((item) => item.inviteCode === inviteCode && !item.usedAt)) {
         return redirectWithMessage(res, "/admin/tenants", "Choose a different invite code because that one is already active.");
       }
-      db.tenantInvites.push(createTenantInvite({ email, fullName, unit, inviteCode }));
+      db.tenantInvites.push(createTenantInvite({ fullName, unit, inviteCode, existingEmails: [
+        ...db.users.map((item) => item.email),
+        ...db.tenantInvites.map((item) => item.email),
+      ] }));
       saveDb(db);
-      return redirectWithMessage(res, "/admin/tenants", `Tenant invite created. Share code ${inviteCode} with ${fullName}.`);
+      return redirectWithMessage(res, "/admin/tenants", `Tenant invite created. Share code ${inviteCode} with ${fullName}. Their email is ${email}.`);
     }
 
     if (pathname === "/admin/projects") {

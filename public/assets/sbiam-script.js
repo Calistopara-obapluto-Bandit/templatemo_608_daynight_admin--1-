@@ -215,74 +215,101 @@ function closeMobileMenu() {
     }
 }
 
-function initInviteValidation() {
-    const form = document.querySelector('[data-invite-form]');
-    if (!form) return;
+function normalizeTenantEmail(fullName) {
+    const base = String(fullName || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+    return `${base || 'tenant'}.tn@gtlodge.com`;
+}
 
-    const emailInput = form.querySelector('[data-invite-email]');
-    const codeInput = form.querySelector('[data-invite-code]');
-    const statusEl = form.querySelector('[data-invite-status]');
-    const submitBtn = form.querySelector('[data-invite-submit]');
-    let requestId = 0;
+function initTenantEmailForms() {
+    const forms = document.querySelectorAll('[data-tenant-email-form]');
+    if (!forms.length) return;
 
-    const setStatus = (state, message) => {
-        if (!statusEl) return;
-        statusEl.textContent = message;
-        statusEl.className = 'invite-status' + (state ? ` ${state}` : '');
-        if (submitBtn) {
-            submitBtn.disabled = state === 'checking';
-        }
-    };
+    forms.forEach((form) => {
+        const nameInput = form.querySelector('[data-invite-full-name], [data-tenant-email-full-name]');
+        const codeInput = form.querySelector('[data-invite-code]');
+        const statusEl = form.querySelector('[data-invite-status]');
+        const previewEl = form.querySelector('[data-tenant-email-preview]');
+        const submitBtn = form.querySelector('[data-invite-submit]');
+        let requestId = 0;
 
-    const validateInvite = async () => {
-        const email = (emailInput?.value || '').trim().toLowerCase();
-        const inviteCode = (codeInput?.value || '').trim().toUpperCase();
+        const updatePreview = () => {
+            if (!previewEl) return;
+            const fullName = (nameInput?.value || '').trim();
+            previewEl.textContent = fullName
+                ? `Generated email: ${normalizeTenantEmail(fullName)}`
+                : 'Your lodge email will be generated from your name.';
+        };
 
-        if (!email || !inviteCode) {
-            setStatus('', 'Enter your approved email and invite code to verify access.');
-            return;
-        }
-
-        const currentRequest = ++requestId;
-        setStatus('checking', 'Checking your invitation...');
-
-        try {
-            const params = new URLSearchParams({ email, invite_code: inviteCode });
-            const response = await fetch(`/register/invite-status?${params.toString()}`, {
-                headers: { 'Accept': 'application/json' }
-            });
-            if (!response.ok) {
-                throw new Error('Request failed');
+        const setStatus = (state, message) => {
+            if (!statusEl) return;
+            statusEl.textContent = message;
+            statusEl.className = 'invite-status' + (state ? ` ${state}` : '');
+            if (submitBtn) {
+                submitBtn.disabled = state === 'checking';
             }
-            const result = await response.json();
-            if (currentRequest !== requestId) return;
-            setStatus(result.ok ? 'valid' : result.state || 'invalid', result.message || 'Invite status unavailable.');
-        } catch (error) {
-            if (currentRequest !== requestId) return;
-            setStatus('invalid', 'Could not verify the invite right now. You can still try again in a moment.');
+        };
+
+        const validateInvite = async () => {
+            const fullName = (nameInput?.value || '').trim();
+            const inviteCode = (codeInput?.value || '').trim().toUpperCase();
+
+            updatePreview();
+
+            if (!fullName || !inviteCode) {
+                if (statusEl) {
+                    setStatus('', 'Enter your approved full name and invite code to verify access.');
+                }
+                return;
+            }
+
+            if (!statusEl) return;
+
+            const currentRequest = ++requestId;
+            setStatus('checking', 'Checking your invitation...');
+
+            try {
+                const params = new URLSearchParams({ full_name: fullName, invite_code: inviteCode });
+                const response = await fetch(`/register/invite-status?${params.toString()}`, {
+                    headers: { 'Accept': 'application/json' }
+                });
+                if (!response.ok) {
+                    throw new Error('Request failed');
+                }
+                const result = await response.json();
+                if (currentRequest !== requestId) return;
+                setStatus(result.ok ? 'valid' : result.state || 'invalid', result.message || 'Invite status unavailable.');
+            } catch (error) {
+                if (currentRequest !== requestId) return;
+                setStatus('invalid', 'Could not verify the invite right now. You can still try again in a moment.');
+            }
+        };
+
+        let timer = null;
+        const queueValidation = () => {
+            clearTimeout(timer);
+            timer = setTimeout(validateInvite, 250);
+        };
+
+        nameInput?.addEventListener('input', queueValidation);
+        codeInput?.addEventListener('input', () => {
+            codeInput.value = codeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
+            queueValidation();
+        });
+        nameInput?.addEventListener('blur', validateInvite);
+        codeInput?.addEventListener('blur', validateInvite);
+
+        updatePreview();
+        if (!statusEl) {
+            queueValidation();
         }
-    };
-
-    let timer = null;
-    const queueValidation = () => {
-        clearTimeout(timer);
-        timer = setTimeout(validateInvite, 250);
-    };
-
-    emailInput?.addEventListener('input', queueValidation);
-    codeInput?.addEventListener('input', () => {
-        codeInput.value = codeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
-        queueValidation();
     });
-    emailInput?.addEventListener('blur', validateInvite);
-    codeInput?.addEventListener('blur', validateInvite);
 }
 
 // ===== Initialize =====
 document.addEventListener('DOMContentLoaded', function() {
     initTheme();
     setGreeting();
-    initInviteValidation();
+    initTenantEmailForms();
     
     if (document.querySelector('.kanban-board')) {
         initKanban();
