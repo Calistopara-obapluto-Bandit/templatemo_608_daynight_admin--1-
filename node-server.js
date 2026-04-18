@@ -43,6 +43,7 @@ function createUser({ email, password, role, fullName, unit }) {
     role,
     fullName: String(fullName || "").trim(),
     unit: String(unit || "").trim(),
+    active: true,
     saltHex,
     passwordHash,
     createdAt: new Date().toISOString(),
@@ -113,13 +114,16 @@ function defaultSettings() {
     supportEmail: ADMIN_EMAIL,
     totalUnits: 25,
     announcement: "",
+    announcementUpdatedAt: "",
   };
 }
 
 function normalizeDb(db) {
   const settings = db && typeof db.settings === "object" && db.settings ? db.settings : {};
   return {
-    users: Array.isArray(db && db.users) ? db.users : [],
+    users: Array.isArray(db && db.users)
+      ? db.users.map((user) => ({ ...user, active: user.active !== false }))
+      : [],
     sessions: Array.isArray(db && db.sessions) ? db.sessions : [],
     bills: Array.isArray(db && db.bills) ? db.bills : [],
     payments: Array.isArray(db && db.payments) ? db.payments : [],
@@ -131,6 +135,7 @@ function normalizeDb(db) {
       supportEmail: String(settings.supportEmail || defaultSettings().supportEmail).trim().toLowerCase(),
       totalUnits: Math.max(1, Number(settings.totalUnits) || defaultSettings().totalUnits),
       announcement: normalizeLine(settings.announcement || "", 160),
+      announcementUpdatedAt: String(settings.announcementUpdatedAt || "").trim(),
     },
   };
 }
@@ -562,13 +567,13 @@ function renderActivityFeed(items, emptyMessage) {
   return items.length ? items.join("") : `<div style="padding:1rem; color:var(--text-secondary);">${escapeHtml(emptyMessage)}</div>`;
 }
 
-function renderAnnouncementCard(message, title = "Announcement") {
+function renderAnnouncementCard(message, title = "Announcement", updatedAt = "") {
   if (!String(message || "").trim()) return "";
   return `<div class="card" style="margin-bottom:1.5rem; border-color: rgba(56, 189, 248, 0.24); background: linear-gradient(135deg, rgba(56,189,248,0.10), rgba(34,197,94,0.06));">
     <div class="card-header">
       <div>
         <h3 class="card-title">${escapeHtml(title)}</h3>
-        <p class="card-subtitle">Latest update from management</p>
+        <p class="card-subtitle">Latest update from management${updatedAt ? ` • ${escapeHtml(formatDateTime(updatedAt))}` : ""}</p>
       </div>
       <span class="badge badge-blue">Live</span>
     </div>
@@ -803,7 +808,7 @@ function tenantDashboardView(user, db, flash = "") {
       ${shell.topNav}
       <main class="main-content">
         ${flashBanner}
-        ${renderAnnouncementCard(db.settings.announcement, "Lodge Update")}
+        ${renderAnnouncementCard(db.settings.announcement, "Lodge Update", db.settings.announcementUpdatedAt)}
         <div class="page-header">
           <h1 class="greeting">Welcome, ${escapeHtml(user.fullName)}</h1>
           <p class="greeting-sub">Your account is live for <strong>${escapeHtml(user.unit || "Unit not assigned yet")}</strong>.</p>
@@ -1033,7 +1038,7 @@ function tenantMaintenancePage(user, db, flash = "") {
     navLinks: tenantNavLinks(),
     body: `<main class="main-content">
       ${sectionHeader("Maintenance Requests", "Send issues to management and track the status here.", flash)}
-      ${renderAnnouncementCard(db.settings.announcement, "Service Notice")}
+      ${renderAnnouncementCard(db.settings.announcement, "Service Notice", db.settings.announcementUpdatedAt)}
       <div class="two-col">
         <div class="card">
           <div class="card-header"><div><h3 class="card-title">New Request</h3><p class="card-subtitle">Tell management what needs attention</p></div></div>
@@ -1326,6 +1331,11 @@ function adminNavLinks() {
       href: "/admin/analytics",
       label: "Analytics",
       icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 19 4 5 20 5"/><polyline points="7 16 11 12 14 15 20 9"/></svg>',
+    },
+    {
+      href: "/admin/tenants",
+      label: "Tenants",
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
     },
     {
       href: "/admin/bills",
@@ -1826,6 +1836,98 @@ function adminAnalyticsPage(user, db, flash = "") {
   });
 }
 
+function adminTenantsPage(user, db, flash = "", filters = {}) {
+  const query = normalizeLine(filters.q, 80);
+  const statusFilter = normalizeLine(filters.status, 20);
+  const tenants = db.users
+    .filter((item) => item.role === "tenant")
+    .filter((tenant) => !statusFilter || (statusFilter === "active" ? tenant.active !== false : tenant.active === false))
+    .filter((tenant) => matchesSearch([tenant.fullName, tenant.email, tenant.unit], query))
+    .sort(compareNewestFirst);
+  const activeTenants = tenants.filter((tenant) => tenant.active !== false);
+  const inactiveTenants = tenants.filter((tenant) => tenant.active === false);
+  const assignedUnits = new Set(activeTenants.map((tenant) => tenant.unit).filter(Boolean)).size;
+  const rows = tenants.length
+    ? tenants
+        .map((tenant) => {
+          const tenantBills = db.bills.filter((bill) => bill.tenantId === tenant.id);
+          const tenantOutstanding = tenantBills
+            .filter((bill) => getBillStatus(bill) !== "paid")
+            .reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
+          return `<tr>
+            <td style="padding:0.9rem 0.75rem;">
+              <strong>${escapeHtml(tenant.fullName || "No name")}</strong><br />
+              <span style="color:var(--text-secondary);">${escapeHtml(tenant.email)}</span>
+            </td>
+            <td style="padding:0.9rem 0.75rem;">${escapeHtml(tenant.unit || "Not assigned")}</td>
+            <td style="padding:0.9rem 0.75rem;">${formatCurrency(tenantOutstanding)}</td>
+            <td style="padding:0.9rem 0.75rem;"><span class="badge badge-${tenant.active === false ? "red" : "green"}">${tenant.active === false ? "inactive" : "active"}</span></td>
+            <td style="padding:0.9rem 0.75rem;">
+              <form method="post" action="/admin/tenants/update" style="display:grid; gap:0.5rem;">
+                <input type="hidden" name="tenant_id" value="${escapeHtml(tenant.id)}" />
+                <input type="text" name="full_name" class="form-input" value="${escapeHtml(tenant.fullName || "")}" placeholder="Full name" />
+                <input type="text" name="unit" class="form-input" value="${escapeHtml(tenant.unit || "")}" placeholder="Unit assignment" />
+                <input type="password" name="password" class="form-input" placeholder="New password (optional)" />
+                <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                  <button class="btn btn-primary" type="submit" name="status" value="active">Save Active</button>
+                  <button class="btn btn-secondary" type="submit" name="status" value="inactive">Set Inactive</button>
+                </div>
+              </form>
+            </td>
+          </tr>`;
+        })
+        .join("")
+    : `<tr><td colspan="5" style="padding:1rem 0.75rem; color:var(--text-secondary);">No tenants found for the current filter.</td></tr>`;
+
+  return layoutPage({
+    title: "Tenants - Godstime Lodge",
+    activePath: "/admin/tenants",
+    user,
+    roleLabel: "Admin Dashboard",
+    navLinks: adminNavLinks(),
+    body: `<main class="main-content">
+      ${sectionHeader("Tenants", "Manage tenant records, unit assignment, access, and password resets.", flash)}
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-label">Visible Tenants</div><div class="stat-value">${tenants.length}</div><div class="stat-change positive">Current search result</div></div>
+        <div class="stat-card"><div class="stat-label">Active</div><div class="stat-value">${activeTenants.length}</div><div class="stat-change positive">Can still sign in</div></div>
+        <div class="stat-card"><div class="stat-label">Inactive</div><div class="stat-value">${inactiveTenants.length}</div><div class="stat-change positive">Access paused</div></div>
+        <div class="stat-card"><div class="stat-label">Assigned Units</div><div class="stat-value">${assignedUnits}</div><div class="stat-change positive">Units linked to active tenants</div></div>
+      </div>
+      <div class="card" style="margin-bottom:1.5rem;">
+        <div class="card-header"><div><h3 class="card-title">Find Tenants</h3><p class="card-subtitle">Search by name, email, or unit and filter by access state</p></div></div>
+        <form method="get" action="/admin/tenants" class="control-grid">
+          <input name="q" type="text" class="form-input" value="${escapeHtml(query)}" placeholder="Search tenants" />
+          <select name="status" class="form-input">
+            <option value="">All statuses</option>
+            <option value="active" ${statusFilter === "active" ? "selected" : ""}>Active</option>
+            <option value="inactive" ${statusFilter === "inactive" ? "selected" : ""}>Inactive</option>
+          </select>
+          <button type="submit" class="btn btn-primary">Filter</button>
+        </form>
+      </div>
+      <div class="card card-accent">
+        <div class="card-header"><div><h3 class="card-title">Tenant Management Board</h3><p class="card-subtitle">Update names, assign units, pause access, or reset passwords</p></div></div>
+        <div class="card-scroll">
+          <div class="card-scroll-inner" style="min-width:1100px;">
+            <table style="width:100%; border-collapse:collapse;">
+              <thead>
+                <tr style="text-align:left; color:var(--text-secondary); border-bottom:1px solid var(--border);">
+                  <th style="padding:0.9rem 0.75rem;">Tenant</th>
+                  <th style="padding:0.9rem 0.75rem;">Unit</th>
+                  <th style="padding:0.9rem 0.75rem;">Outstanding</th>
+                  <th style="padding:0.9rem 0.75rem;">Status</th>
+                  <th style="padding:0.9rem 0.75rem;">Manage</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </main>`,
+  });
+}
+
 function adminProjectsPage(user, db, flash = "", filters = {}) {
   const query = normalizeLine(filters.q, 80);
   const statusFilter = normalizeLine(filters.status, 20);
@@ -2312,6 +2414,7 @@ const server = http.createServer(async (req, res) => {
       const db = loadDb();
       const user = db.users.find((u) => u.email === email);
       if (!user) return send(res, 401, loginView("Invalid email or password."));
+      if (user.active === false) return send(res, 403, loginView("This account is currently inactive. Contact management."));
       const hash = pbkdf2Hash(password, user.saltHex);
       if (hash !== user.passwordHash) return send(res, 401, loginView("Invalid email or password."));
 
@@ -2444,6 +2547,54 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, adminAnalyticsPage(user, db, String(url.searchParams.get("message") || "")));
     }
 
+    if (pathname === "/admin/tenants") {
+      const user = requireRole(req, res, "admin");
+      if (!user) return;
+      const db = loadDb();
+      if (method === "GET") {
+        return send(res, 200, adminTenantsPage(user, db, String(url.searchParams.get("message") || ""), {
+          q: String(url.searchParams.get("q") || ""),
+          status: String(url.searchParams.get("status") || ""),
+        }));
+      }
+      return sendText(res, 405, "Method Not Allowed", { Allow: "GET" });
+    }
+
+    if (pathname === "/admin/tenants/update") {
+      const user = requireRole(req, res, "admin");
+      if (!user) return;
+      if (method !== "POST") return sendText(res, 405, "Method Not Allowed", { Allow: "POST" });
+      if (!isFormRequest(req)) return redirectWithMessage(res, "/admin/tenants", "Unsupported tenant update.");
+      const body = await readBody(req);
+      const form = parseForm(body);
+      const db = loadDb();
+      const tenant = db.users.find((item) => item.id === normalizeLine(form.tenant_id, 40) && item.role === "tenant");
+      if (!tenant) return redirectWithMessage(res, "/admin/tenants", "Tenant not found.");
+      const fullName = normalizeLine(form.full_name, 80);
+      const unit = normalizeLine(form.unit, 40);
+      const status = normalizeLine(form.status, 20);
+      const password = String(form.password || "");
+      if (!fullName) return redirectWithMessage(res, "/admin/tenants", "Tenant name cannot be empty.");
+      if (!["active", "inactive"].includes(status)) return redirectWithMessage(res, "/admin/tenants", "Choose a valid tenant status.");
+      if (password && password.length < 6) return redirectWithMessage(res, "/admin/tenants", "New password must be at least 6 characters.");
+      tenant.fullName = fullName;
+      tenant.unit = unit;
+      tenant.active = status === "active";
+      if (password) {
+        const replacement = createUser({
+          email: tenant.email,
+          password,
+          role: tenant.role,
+          fullName: tenant.fullName,
+          unit: tenant.unit,
+        });
+        tenant.saltHex = replacement.saltHex;
+        tenant.passwordHash = replacement.passwordHash;
+      }
+      saveDb(db);
+      return redirectWithMessage(res, "/admin/tenants", "Tenant record updated successfully.");
+    }
+
     if (pathname === "/admin/projects") {
       const user = requireRole(req, res, "admin");
       if (!user) return;
@@ -2463,7 +2614,7 @@ const server = http.createServer(async (req, res) => {
       const owner = normalizeLine(form.owner, 60);
       const budget = Number(form.budget || 0);
       const dueDate = normalizeLine(form.due_date, 10);
-      if (!title || !description || budget < 0) {
+      if (!title || !description || !Number.isFinite(budget) || budget < 0) {
         return redirectWithMessage(res, "/admin/projects", "Please complete the project form correctly.");
       }
       if (dueDate && !isValidDateInput(dueDate)) {
@@ -2507,11 +2658,14 @@ const server = http.createServer(async (req, res) => {
       const supportEmail = String(form.support_email || "").trim().toLowerCase();
       const totalUnits = Number(form.total_units || 0);
       const announcement = normalizeLine(form.announcement, 160);
-      if (!supportEmail || !supportEmail.includes("@") || totalUnits < 1) {
+      if (!supportEmail || !supportEmail.includes("@") || !Number.isFinite(totalUnits) || totalUnits < 1) {
         return redirectWithMessage(res, "/admin/settings", "Please enter valid settings values.");
       }
       db.settings.supportEmail = supportEmail;
       db.settings.totalUnits = totalUnits;
+      if (announcement !== db.settings.announcement) {
+        db.settings.announcementUpdatedAt = new Date().toISOString();
+      }
       db.settings.announcement = announcement;
       saveDb(db);
       return redirectWithMessage(res, "/admin/settings", "Settings updated successfully.");
