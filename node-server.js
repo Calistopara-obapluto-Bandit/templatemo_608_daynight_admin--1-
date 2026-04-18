@@ -259,6 +259,11 @@ function sendText(res, status, body, headers = {}) {
   res.end(body);
 }
 
+function sendJson(res, status, payload, headers = {}) {
+  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...headers });
+  res.end(JSON.stringify(payload));
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let data = "";
@@ -687,20 +692,21 @@ function registerView(error = "") {
             <p class="login-subtitle">Only tenants approved by management can register with an invite code.</p>
           </div>
           ${err}
-          <form class="login-form" method="post" action="/register">
+          <form class="login-form" method="post" action="/register" data-invite-form>
             <div class="form-group">
               <label class="form-label">Email Address</label>
-              <input name="email" type="email" class="form-input" placeholder="you@example.com" required />
+              <input name="email" type="email" class="form-input" placeholder="you@example.com" autocomplete="email" data-invite-email required />
             </div>
             <div class="form-group">
               <label class="form-label">Invite Code</label>
-              <input name="invite_code" type="text" class="form-input" maxlength="12" placeholder="Enter the code from management" required />
+              <input name="invite_code" type="text" class="form-input" maxlength="12" placeholder="Enter the code from management" data-invite-code required />
             </div>
+            <div class="invite-status" data-invite-status aria-live="polite">Enter your approved email and invite code to verify access.</div>
             <div class="form-group">
               <label class="form-label">Password</label>
               <input name="password" type="password" class="form-input" placeholder="Minimum 6 characters" required />
             </div>
-            <button type="submit" class="btn btn-primary">Create Account</button>
+            <button type="submit" class="btn btn-primary" data-invite-submit>Create Account</button>
           </form>
           <p class="login-footer" style="margin-top:1rem;">Already registered? <a href="/login">Sign in</a></p>
         </div>
@@ -2526,6 +2532,28 @@ const server = http.createServer(async (req, res) => {
       const session = persistSession(tenant.id);
       res.setHeader("Set-Cookie", buildSessionCookie(session.id, Math.floor(SESSION_TTL_MS / 1000)));
       return redirect(res, "/tenant/dashboard");
+    }
+
+    if (pathname === "/register/invite-status") {
+      if (method !== "GET") return sendText(res, 405, "Method Not Allowed", { Allow: "GET" });
+      const email = String(url.searchParams.get("email") || "").trim().toLowerCase();
+      const inviteCode = normalizeInviteCode(url.searchParams.get("invite_code"));
+      if (!email || !inviteCode) {
+        return sendJson(res, 200, { ok: false, state: "idle", message: "Enter your approved email and invite code to verify access." });
+      }
+      const db = loadDb();
+      if (db.users.some((user) => user.email === email)) {
+        return sendJson(res, 200, { ok: false, state: "used", message: "That email already has an account. Sign in instead." });
+      }
+      const invite = db.tenantInvites.find((item) => item.email === email && item.inviteCode === inviteCode && !item.usedAt);
+      if (!invite) {
+        return sendJson(res, 200, { ok: false, state: "invalid", message: "Invite not found. Use the exact approved email and code from management." });
+      }
+      return sendJson(res, 200, {
+        ok: true,
+        state: "valid",
+        message: `Invite confirmed for ${invite.fullName || invite.email}${invite.unit ? ` • ${invite.unit}` : ""}.`,
+      });
     }
 
     if (pathname === "/logout") {

@@ -215,10 +215,74 @@ function closeMobileMenu() {
     }
 }
 
+function initInviteValidation() {
+    const form = document.querySelector('[data-invite-form]');
+    if (!form) return;
+
+    const emailInput = form.querySelector('[data-invite-email]');
+    const codeInput = form.querySelector('[data-invite-code]');
+    const statusEl = form.querySelector('[data-invite-status]');
+    const submitBtn = form.querySelector('[data-invite-submit]');
+    let requestId = 0;
+
+    const setStatus = (state, message) => {
+        if (!statusEl) return;
+        statusEl.textContent = message;
+        statusEl.className = 'invite-status' + (state ? ` ${state}` : '');
+        if (submitBtn) {
+            submitBtn.disabled = state === 'checking';
+        }
+    };
+
+    const validateInvite = async () => {
+        const email = (emailInput?.value || '').trim().toLowerCase();
+        const inviteCode = (codeInput?.value || '').trim().toUpperCase();
+
+        if (!email || !inviteCode) {
+            setStatus('', 'Enter your approved email and invite code to verify access.');
+            return;
+        }
+
+        const currentRequest = ++requestId;
+        setStatus('checking', 'Checking your invitation...');
+
+        try {
+            const params = new URLSearchParams({ email, invite_code: inviteCode });
+            const response = await fetch(`/register/invite-status?${params.toString()}`, {
+                headers: { 'Accept': 'application/json' }
+            });
+            if (!response.ok) {
+                throw new Error('Request failed');
+            }
+            const result = await response.json();
+            if (currentRequest !== requestId) return;
+            setStatus(result.ok ? 'valid' : result.state || 'invalid', result.message || 'Invite status unavailable.');
+        } catch (error) {
+            if (currentRequest !== requestId) return;
+            setStatus('invalid', 'Could not verify the invite right now. You can still try again in a moment.');
+        }
+    };
+
+    let timer = null;
+    const queueValidation = () => {
+        clearTimeout(timer);
+        timer = setTimeout(validateInvite, 250);
+    };
+
+    emailInput?.addEventListener('input', queueValidation);
+    codeInput?.addEventListener('input', () => {
+        codeInput.value = codeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
+        queueValidation();
+    });
+    emailInput?.addEventListener('blur', validateInvite);
+    codeInput?.addEventListener('blur', validateInvite);
+}
+
 // ===== Initialize =====
 document.addEventListener('DOMContentLoaded', function() {
     initTheme();
     setGreeting();
+    initInviteValidation();
     
     if (document.querySelector('.kanban-board')) {
         initKanban();
