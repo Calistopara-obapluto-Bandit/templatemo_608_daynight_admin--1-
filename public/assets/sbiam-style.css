@@ -1798,16 +1798,13 @@ tr:hover td {
         gap: 1rem;
     }
 
+    .nav-link {
+        padding: 0.55rem 0.8rem;
+        font-size: 0.84rem;
+    }
+
     .nav-menu {
-        display: none;
-    }
-
-    .user-name {
-        display: none;
-    }
-
-    .mobile-menu-btn {
-        display: flex;
+        gap: 0.3rem;
     }
 
     .stats-grid {
@@ -1824,6 +1821,18 @@ tr:hover td {
 }
 
 @media (max-width: 992px) {
+    .nav-menu {
+        display: none;
+    }
+
+    .user-name {
+        display: none;
+    }
+
+    .mobile-menu-btn {
+        display: flex;
+    }
+
     .main-content {
         padding: 1.5rem;
     }
