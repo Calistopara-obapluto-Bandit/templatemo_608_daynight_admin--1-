@@ -510,9 +510,13 @@ function renderShellChrome({
 }) {
   const avatar = escapeHtml((user.fullName || "A").slice(0, 1).toUpperCase());
   const name = escapeHtml(user.fullName || "User");
-  const tenantQuickLinks = user.role === "tenant"
-    ? navLinks.filter((item) => ["/tenant/dashboard", "/tenant/bills", "/tenant/payments", "/tenant/requests"].includes(item.href))
-    : [];
+  const findNavItem = (href) => navLinks.find((item) => item.href === href) || null;
+  const roleQuickLinkHrefs = user.role === "tenant"
+    ? ["/tenant/dashboard", "/tenant/bills", "/tenant/payments", "/tenant/requests"]
+    : ["/admin/dashboard", "/admin/analytics", "/admin/tenants", "/admin/payments"];
+  const quickLinksSource = roleQuickLinkHrefs
+    .map(findNavItem)
+    .filter(Boolean);
   const settingsLink = user.role === "admin"
     ? {
         href: "/admin/settings",
@@ -572,11 +576,11 @@ function renderShellChrome({
         )
         .join("")
     : "";
-  const mobileQuickLinks = tenantQuickLinks.length
+  const mobileQuickLinks = quickLinksSource.length
     ? `<div class="mobile-menu-quick">
         <div class="mobile-menu-quick-label">Quick Access</div>
         <div class="mobile-menu-quick-grid">
-          ${tenantQuickLinks
+          ${quickLinksSource
             .map((item) => `<a href="${item.href}" class="mobile-quick-link${activePath === item.href ? " active" : ""}">
               ${item.icon}
               <span>${escapeHtml(item.label)}</span>
@@ -679,9 +683,9 @@ function renderShellChrome({
           </div>
         </div>
       </nav>`;
-  const mobileTabBar = user.role === "tenant" && tenantQuickLinks.length
+  const mobileTabBar = user.role === "tenant" && quickLinksSource.length
     ? `<nav class="mobile-tabbar" aria-label="Tenant quick navigation">
-        ${tenantQuickLinks
+        ${quickLinksSource
           .map((item) => `<a href="${item.href}" class="mobile-tab-link${activePath === item.href ? " active" : ""}">
             ${item.icon}
             <span>${escapeHtml(item.label)}</span>
