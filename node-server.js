@@ -18,6 +18,7 @@ const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const DB_PATH = path.join(DATA_DIR, "node-db.json");
 const PUBLIC_DIR = path.join(__dirname, "public");
 const ASSETS_DIR = path.join(PUBLIC_DIR, "assets");
+const PAYMENT_SYMBOL_MARKUP = '<text x="12" y="16" text-anchor="middle" font-size="15" font-weight="700" fill="currentColor">₦</text>';
 
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -93,13 +94,44 @@ function createMaintenanceRequest({ tenantId, title, description }) {
   };
 }
 
+function createProject({ title, description, owner, budget, dueDate, status = "planned" }) {
+  return {
+    id: randomId(12),
+    title: String(title || "").trim(),
+    description: String(description || "").trim(),
+    owner: String(owner || "").trim(),
+    budget: Number(budget) || 0,
+    dueDate: String(dueDate || "").trim(),
+    status,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function defaultSettings() {
+  return {
+    lodgeName: "Godstime Lodge",
+    supportEmail: ADMIN_EMAIL,
+    totalUnits: 25,
+    announcement: "",
+  };
+}
+
 function normalizeDb(db) {
+  const settings = db && typeof db.settings === "object" && db.settings ? db.settings : {};
   return {
     users: Array.isArray(db && db.users) ? db.users : [],
     sessions: Array.isArray(db && db.sessions) ? db.sessions : [],
     bills: Array.isArray(db && db.bills) ? db.bills : [],
     payments: Array.isArray(db && db.payments) ? db.payments : [],
     maintenanceRequests: Array.isArray(db && db.maintenanceRequests) ? db.maintenanceRequests : [],
+    projects: Array.isArray(db && db.projects) ? db.projects : [],
+    settings: {
+      ...defaultSettings(),
+      lodgeName: normalizeLine(settings.lodgeName || defaultSettings().lodgeName, 60) || defaultSettings().lodgeName,
+      supportEmail: String(settings.supportEmail || defaultSettings().supportEmail).trim().toLowerCase(),
+      totalUnits: Math.max(1, Number(settings.totalUnits) || defaultSettings().totalUnits),
+      announcement: normalizeLine(settings.announcement || "", 160),
+    },
   };
 }
 
@@ -113,7 +145,7 @@ function loadDb() {
       fullName: "Admin",
       unit: "",
     });
-    const db = { users: [admin], sessions: [], bills: [], payments: [], maintenanceRequests: [] };
+    const db = { users: [admin], sessions: [], bills: [], payments: [], maintenanceRequests: [], projects: [], settings: defaultSettings() };
     fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), "utf8");
   }
   return syncBillStatuses(normalizeDb(JSON.parse(fs.readFileSync(DB_PATH, "utf8"))));
@@ -311,6 +343,12 @@ function getPaymentStatusTone(status) {
 function getMaintenanceStatusTone(status) {
   if (status === "resolved") return "green";
   if (status === "in-progress") return "orange";
+  return "blue";
+}
+
+function getProjectStatusTone(status) {
+  if (status === "completed") return "green";
+  if (status === "active") return "orange";
   return "blue";
 }
 
@@ -676,7 +714,7 @@ function tenantDashboardView(user, db, flash = "") {
     recentActivity.push(
       renderActivityItem({
         tone: "green",
-        iconSvg: '<path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+        iconSvg: PAYMENT_SYMBOL_MARKUP,
         title: "Payment submitted",
         detail: `${formatCurrency(payments[0].amount)} is ${payments[0].status}`,
         time: formatDateTime(payments[0].createdAt),
@@ -689,7 +727,7 @@ function tenantDashboardView(user, db, flash = "") {
     recentActivity.push(
       renderActivityItem({
         tone: "green",
-        iconSvg: '<path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+        iconSvg: PAYMENT_SYMBOL_MARKUP,
         title: "Another payment",
         detail: `${formatCurrency(payments[1].amount)} is ${payments[1].status}`,
         time: formatDateTime(payments[1].createdAt),
@@ -913,7 +951,7 @@ function tenantPaymentsPage(user, db, flash = "") {
   const items = payments.length
     ? payments.map((payment) => renderActivityItem({
         tone: "green",
-        iconSvg: '<path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+        iconSvg: PAYMENT_SYMBOL_MARKUP,
         title: formatCurrency(payment.amount),
         detail: payment.note || "No note added",
         time: formatDateTime(payment.createdAt),
@@ -1011,7 +1049,7 @@ function tenantNavLinks() {
     {
       href: "/tenant/payments",
       label: "Payments",
-      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>',
+      icon: `<svg viewBox="0 0 24 24" fill="none">${PAYMENT_SYMBOL_MARKUP}</svg>`,
     },
     {
       href: "/tenant/requests",
@@ -1132,7 +1170,7 @@ function tenantAnalyticsPage(user, db, flash = "") {
   if (payments[0]) {
     recentActivity.push(renderActivityItem({
       tone: "green",
-      iconSvg: '<path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+      iconSvg: PAYMENT_SYMBOL_MARKUP,
       title: "Payment activity",
       detail: `${formatCurrency(payments[0].amount)} • ${payments[0].status}`,
       time: formatDateTime(payments[0].createdAt),
@@ -1165,19 +1203,6 @@ function tenantAnalyticsPage(user, db, flash = "") {
         <div class="stat-card"><div class="stat-label">Payments</div><div class="stat-value">${payments.length}</div><div class="stat-change positive">${approvedPayments.length} approved</div></div>
         <div class="stat-card"><div class="stat-label">Open Requests</div><div class="stat-value">${openRequests.length}</div><div class="stat-change positive">${requests.length} total maintenance tickets</div></div>
         <div class="stat-card"><div class="stat-label">Outstanding</div><div class="stat-value">${formatCurrency(totalDue)}</div><div class="stat-change positive">Remaining balance</div></div>
-      </div>
-      <div class="card" style="margin-top: 1.5rem;">
-        <div class="card-header">
-          <div>
-            <h3 class="card-title">Next Actions</h3>
-            <p class="card-subtitle">Fast links for the tasks you do most</p>
-          </div>
-        </div>
-        <div style="padding: 1rem 1.25rem; display:flex; gap:0.75rem; flex-wrap:wrap;">
-          <a class="btn btn-primary" href="/tenant/payments">Submit Payment</a>
-          <a class="btn btn-secondary" href="/tenant/bills">View Bills</a>
-          <a class="btn btn-secondary" href="/tenant/requests">Report Issue</a>
-        </div>
       </div>
       <div class="two-col">
         <div class="card">
@@ -1272,18 +1297,28 @@ function adminNavLinks() {
     {
       href: "/admin/payments",
       label: "Payments",
-      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>',
+      icon: `<svg viewBox="0 0 24 24" fill="none">${PAYMENT_SYMBOL_MARKUP}</svg>`,
     },
     {
       href: "/admin/maintenance",
       label: "Maintenance",
       icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
     },
+    {
+      href: "/admin/projects",
+      label: "Projects",
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18"/><path d="M6 3h12l3 4v14H3V7l3-4z"/><path d="M9 12h6"/><path d="M9 16h4"/></svg>',
+    },
+    {
+      href: "/admin/settings",
+      label: "Settings",
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06A2 2 0 1 1 4.21 16.96l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06A2 2 0 1 1 7.04 4.3l.06.06A1.65 1.65 0 0 0 8.92 4a1.65 1.65 0 0 0 1-1.51V2a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06A2 2 0 1 1 19.79 7.04l-.06.06A1.65 1.65 0 0 0 19.4 9c.2.61.79 1.02 1.43 1H21a2 2 0 1 1 0 4h-.17c-.64 0-1.23.41-1.43 1z"/></svg>',
+    },
   ];
 }
 
 function adminDashboardView(user, db, flash = "") {
-  const totalUnits = 25;
+  const totalUnits = db.settings.totalUnits;
   const tenants = db.users
     .filter((item) => item.role === "tenant")
     .sort(compareNewestFirst);
@@ -1358,7 +1393,7 @@ function adminDashboardView(user, db, flash = "") {
     recentActivity.push(
       renderActivityItem({
         tone: "green",
-        iconSvg: '<path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+        iconSvg: PAYMENT_SYMBOL_MARKUP,
         title: `${tenant ? tenant.fullName || tenant.email : "Tenant"} payment`,
         detail: `${formatCurrency(payments[0].amount)} is ${payments[0].status}`,
         time: formatDateTime(payments[0].createdAt),
@@ -1372,7 +1407,7 @@ function adminDashboardView(user, db, flash = "") {
     recentActivity.push(
       renderActivityItem({
         tone: "green",
-        iconSvg: '<path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+        iconSvg: PAYMENT_SYMBOL_MARKUP,
         title: `${tenant ? tenant.fullName || tenant.email : "Tenant"} payment`,
         detail: `${formatCurrency(payments[1].amount)} is ${payments[1].status}`,
         time: formatDateTime(payments[1].createdAt),
@@ -1538,7 +1573,7 @@ function adminDashboardView(user, db, flash = "") {
 }
 
 function adminAnalyticsPage(user, db, flash = "") {
-  const totalUnits = 25;
+  const totalUnits = db.settings.totalUnits;
   const tenants = db.users
     .filter((item) => item.role === "tenant")
     .sort(compareNewestFirst);
@@ -1606,7 +1641,7 @@ function adminAnalyticsPage(user, db, flash = "") {
     const tenant = db.users.find((item) => item.id === payments[0].tenantId);
     recentActivity.push(renderActivityItem({
       tone: "green",
-      iconSvg: '<path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+      iconSvg: PAYMENT_SYMBOL_MARKUP,
       title: `${tenant ? tenant.fullName || tenant.email : "Tenant"} payment`,
       detail: `${formatCurrency(payments[0].amount)} • ${payments[0].status}`,
       time: formatDateTime(payments[0].createdAt),
@@ -1618,7 +1653,7 @@ function adminAnalyticsPage(user, db, flash = "") {
     const tenant = db.users.find((item) => item.id === payments[1].tenantId);
     recentActivity.push(renderActivityItem({
       tone: "green",
-      iconSvg: '<path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+      iconSvg: PAYMENT_SYMBOL_MARKUP,
       title: `${tenant ? tenant.fullName || tenant.email : "Tenant"} payment`,
       detail: `${formatCurrency(payments[1].amount)} • ${payments[1].status}`,
       time: formatDateTime(payments[1].createdAt),
@@ -1689,19 +1724,6 @@ function adminAnalyticsPage(user, db, flash = "") {
         <div class="stat-card"><div class="stat-label">Outstanding Bills</div><div class="stat-value">${outstandingBills.length}</div><div class="stat-change positive">${formatCurrency(outstandingBills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0))}</div></div>
         <div class="stat-card"><div class="stat-label">Approved Payments</div><div class="stat-value">${approvedPayments.length}</div><div class="stat-change positive">${pendingPayments.length} pending payments</div></div>
       </div>
-      <div class="card" style="margin-top:1.5rem;">
-        <div class="card-header">
-          <div>
-            <h3 class="card-title">Fast Actions</h3>
-            <p class="card-subtitle">Jump straight to the operational pages</p>
-          </div>
-        </div>
-        <div style="padding: 1rem 1.25rem; display:flex; gap:0.75rem; flex-wrap:wrap;">
-          <a href="/admin/bills" class="btn btn-primary">Bills</a>
-          <a href="/admin/payments" class="btn btn-secondary">Payments</a>
-          <a href="/admin/maintenance" class="btn btn-secondary">Maintenance</a>
-        </div>
-      </div>
       <div class="two-col">
         <div class="card">
           <div class="card-header">
@@ -1759,6 +1781,126 @@ function adminAnalyticsPage(user, db, flash = "") {
         <div class="card-scroll">
           <div class="card-scroll-inner" style="min-width:340px;">
             <div class="activity-feed">${renderActivityFeed(recentActivity, "Activity will appear here as the lodge starts moving.")}</div>
+          </div>
+        </div>
+      </div>
+    </main>`,
+  });
+}
+
+function adminProjectsPage(user, db, flash = "") {
+  const projects = [...db.projects].sort(compareNewestFirst);
+  const activeProjects = projects.filter((project) => project.status === "active");
+  const completedProjects = projects.filter((project) => project.status === "completed");
+  const plannedProjects = projects.filter((project) => project.status === "planned");
+  const rows = projects.length
+    ? projects
+        .map((project) => `<tr>
+          <td style="padding:0.9rem 0.75rem;"><strong>${escapeHtml(project.title)}</strong></td>
+          <td style="padding:0.9rem 0.75rem;">${escapeHtml(project.owner || "Admin team")}</td>
+          <td style="padding:0.9rem 0.75rem;">${formatCurrency(project.budget)}</td>
+          <td style="padding:0.9rem 0.75rem;">${escapeHtml(isValidDateInput(project.dueDate) ? formatDateOnly(`${project.dueDate}T00:00:00Z`) : "No deadline")}</td>
+          <td style="padding:0.9rem 0.75rem;"><span class="badge badge-${getProjectStatusTone(project.status)}">${escapeHtml(project.status)}</span></td>
+          <td style="padding:0.9rem 0.75rem;">
+            <form method="post" action="/admin/projects/status" style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+              <input type="hidden" name="project_id" value="${escapeHtml(project.id)}" />
+              <button class="btn btn-primary" type="submit" name="status" value="active" ${project.status === "active" || project.status === "completed" ? "disabled" : ""}>Start</button>
+              <button class="btn btn-secondary" type="submit" name="status" value="completed" ${project.status === "completed" ? "disabled" : ""}>Complete</button>
+            </form>
+          </td>
+        </tr>`)
+        .join("")
+    : `<tr><td colspan="6" style="padding:1rem 0.75rem; color:var(--text-secondary);">No projects added yet.</td></tr>`;
+
+  return layoutPage({
+    title: "Projects - Godstime Lodge",
+    activePath: "/admin/projects",
+    user,
+    roleLabel: "Admin Dashboard",
+    navLinks: adminNavLinks(),
+    body: `<main class="main-content">
+      ${sectionHeader("Projects", "Track lodge upgrades, major repairs, and operational initiatives.", flash)}
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-label">Total Projects</div><div class="stat-value">${projects.length}</div><div class="stat-change positive">All tracked workstreams</div></div>
+        <div class="stat-card"><div class="stat-label">Planned</div><div class="stat-value">${plannedProjects.length}</div><div class="stat-change positive">Waiting to begin</div></div>
+        <div class="stat-card"><div class="stat-label">Active</div><div class="stat-value">${activeProjects.length}</div><div class="stat-change positive">In progress now</div></div>
+        <div class="stat-card"><div class="stat-label">Completed</div><div class="stat-value">${completedProjects.length}</div><div class="stat-change positive">Finished projects</div></div>
+      </div>
+      <div class="two-col">
+        <div class="card">
+          <div class="card-header"><div><h3 class="card-title">Create Project</h3><p class="card-subtitle">Use this for upgrades, large repairs, and planned lodge work</p></div></div>
+          <form method="post" action="/admin/projects" style="padding:1rem 1.25rem; display:grid; gap:0.85rem;">
+            <div class="form-group"><label class="form-label">Project Title</label><input name="title" type="text" maxlength="80" class="form-input" placeholder="e.g. Compound lighting upgrade" required /></div>
+            <div class="form-group"><label class="form-label">Owner</label><input name="owner" type="text" maxlength="60" class="form-input" placeholder="e.g. Facilities Manager" /></div>
+            <div class="form-group"><label class="form-label">Budget</label><input name="budget" type="number" min="0" step="1000" class="form-input" placeholder="e.g. 500000" required /></div>
+            <div class="form-group"><label class="form-label">Deadline</label><input name="due_date" type="date" class="form-input" /></div>
+            <div class="form-group"><label class="form-label">Description</label><textarea name="description" class="form-input" rows="4" maxlength="300" placeholder="What is this project meant to achieve?" required></textarea></div>
+            <button type="submit" class="btn btn-primary">Create Project</button>
+          </form>
+        </div>
+        <div class="card">
+          <div class="card-header"><div><h3 class="card-title">Why Projects Matter</h3><p class="card-subtitle">A separate project board helps with bigger work than day-to-day maintenance</p></div></div>
+          <div style="padding:1rem 1.25rem; display:grid; gap:0.9rem;">
+            <div><strong>Best for:</strong> renovations, upgrades, compliance work, and multi-step repairs.</div>
+            <div><strong>Not for:</strong> quick tenant issues that belong on the maintenance page.</div>
+            <div><strong>Budget tracked:</strong> ${formatCurrency(projects.reduce((sum, project) => sum + (Number(project.budget) || 0), 0))}</div>
+            <div><strong>Active owners:</strong> ${activeProjects.length ? escapeHtml(activeProjects.map((project) => project.owner || "Admin team").slice(0, 3).join(", ")) : "No active projects yet"}</div>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:1.5rem;">
+        <div class="card-header"><div><h3 class="card-title">Project Board</h3><p class="card-subtitle">Status, budgets, deadlines, and quick actions</p></div></div>
+        <div class="card-scroll">
+          <div class="card-scroll-inner" style="min-width:980px;">
+            <table style="width:100%; border-collapse:collapse;">
+              <thead>
+                <tr style="text-align:left; color:var(--text-secondary); border-bottom:1px solid var(--border);">
+                  <th style="padding:0.9rem 0.75rem;">Project</th>
+                  <th style="padding:0.9rem 0.75rem;">Owner</th>
+                  <th style="padding:0.9rem 0.75rem;">Budget</th>
+                  <th style="padding:0.9rem 0.75rem;">Deadline</th>
+                  <th style="padding:0.9rem 0.75rem;">Status</th>
+                  <th style="padding:0.9rem 0.75rem;">Action</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </main>`,
+  });
+}
+
+function adminSettingsPage(user, db, flash = "") {
+  const settings = db.settings;
+
+  return layoutPage({
+    title: "Settings - Godstime Lodge",
+    activePath: "/admin/settings",
+    user,
+    roleLabel: "Admin Dashboard",
+    navLinks: adminNavLinks(),
+    body: `<main class="main-content">
+      ${sectionHeader("Settings", "Update the operational values that shape the portal.", flash)}
+      <div class="two-col">
+        <div class="card">
+          <div class="card-header"><div><h3 class="card-title">Portal Settings</h3><p class="card-subtitle">Operational settings for the lodge portal</p></div></div>
+          <form method="post" action="/admin/settings" style="padding:1rem 1.25rem; display:grid; gap:0.85rem;">
+            <div class="form-group"><label class="form-label">Support Email</label><input name="support_email" type="email" class="form-input" value="${escapeHtml(settings.supportEmail)}" required /></div>
+            <div class="form-group"><label class="form-label">Total Units</label><input name="total_units" type="number" min="1" step="1" class="form-input" value="${escapeHtml(settings.totalUnits)}" required /></div>
+            <div class="form-group"><label class="form-label">Announcement</label><textarea name="announcement" class="form-input" rows="4" maxlength="160" placeholder="Short message for operations updates">${escapeHtml(settings.announcement || "")}</textarea></div>
+            <button type="submit" class="btn btn-primary">Save Settings</button>
+          </form>
+        </div>
+        <div class="card">
+          <div class="card-header"><div><h3 class="card-title">System Snapshot</h3><p class="card-subtitle">Current portal configuration at a glance</p></div></div>
+          <div style="padding:1rem 1.25rem; display:grid; gap:0.9rem;">
+            <div><strong>Support Email:</strong> ${escapeHtml(settings.supportEmail)}</div>
+            <div><strong>Total Units:</strong> ${escapeHtml(settings.totalUnits)}</div>
+            <div><strong>Announcement:</strong> ${escapeHtml(settings.announcement || "No announcement set")}</div>
+            <div><strong>Render Health Check:</strong> <code>/healthz</code></div>
+            <div><strong>Data Storage:</strong> <code>${escapeHtml(DATA_DIR)}</code></div>
           </div>
         </div>
       </div>
@@ -2180,6 +2322,76 @@ const server = http.createServer(async (req, res) => {
       if (!user) return;
       const db = loadDb();
       return send(res, 200, adminAnalyticsPage(user, db, String(url.searchParams.get("message") || "")));
+    }
+
+    if (pathname === "/admin/projects") {
+      const user = requireRole(req, res, "admin");
+      if (!user) return;
+      const db = loadDb();
+      if (method === "GET") {
+        return send(res, 200, adminProjectsPage(user, db, String(url.searchParams.get("message") || "")));
+      }
+      if (method !== "POST") return sendText(res, 405, "Method Not Allowed", { Allow: "GET, POST" });
+      if (!isFormRequest(req)) return redirectWithMessage(res, "/admin/projects", "Unsupported project submission.");
+      const body = await readBody(req);
+      const form = parseForm(body);
+      const title = normalizeLine(form.title, 80);
+      const description = normalizeLine(form.description, 300);
+      const owner = normalizeLine(form.owner, 60);
+      const budget = Number(form.budget || 0);
+      const dueDate = normalizeLine(form.due_date, 10);
+      if (!title || !description || budget < 0) {
+        return redirectWithMessage(res, "/admin/projects", "Please complete the project form correctly.");
+      }
+      if (dueDate && !isValidDateInput(dueDate)) {
+        return redirectWithMessage(res, "/admin/projects", "Choose a valid project deadline.");
+      }
+      db.projects.push(createProject({ title, description, owner, budget, dueDate }));
+      saveDb(db);
+      return redirectWithMessage(res, "/admin/projects", "Project created successfully.");
+    }
+
+    if (pathname === "/admin/projects/status") {
+      const user = requireRole(req, res, "admin");
+      if (!user) return;
+      if (method !== "POST") return sendText(res, 405, "Method Not Allowed", { Allow: "POST" });
+      if (!isFormRequest(req)) return redirectWithMessage(res, "/admin/projects", "Unsupported project update.");
+      const body = await readBody(req);
+      const form = parseForm(body);
+      const db = loadDb();
+      const project = db.projects.find((item) => item.id === normalizeLine(form.project_id, 40));
+      if (!project) return redirectWithMessage(res, "/admin/projects", "Project not found.");
+      const nextStatus = normalizeLine(form.status, 20);
+      if (!["planned", "active", "completed"].includes(nextStatus)) {
+        return redirectWithMessage(res, "/admin/projects", "Choose a valid project status.");
+      }
+      project.status = nextStatus;
+      saveDb(db);
+      return redirectWithMessage(res, "/admin/projects", "Project status updated.");
+    }
+
+    if (pathname === "/admin/settings") {
+      const user = requireRole(req, res, "admin");
+      if (!user) return;
+      const db = loadDb();
+      if (method === "GET") {
+        return send(res, 200, adminSettingsPage(user, db, String(url.searchParams.get("message") || "")));
+      }
+      if (method !== "POST") return sendText(res, 405, "Method Not Allowed", { Allow: "GET, POST" });
+      if (!isFormRequest(req)) return redirectWithMessage(res, "/admin/settings", "Unsupported settings update.");
+      const body = await readBody(req);
+      const form = parseForm(body);
+      const supportEmail = String(form.support_email || "").trim().toLowerCase();
+      const totalUnits = Number(form.total_units || 0);
+      const announcement = normalizeLine(form.announcement, 160);
+      if (!supportEmail || !supportEmail.includes("@") || totalUnits < 1) {
+        return redirectWithMessage(res, "/admin/settings", "Please enter valid settings values.");
+      }
+      db.settings.supportEmail = supportEmail;
+      db.settings.totalUnits = totalUnits;
+      db.settings.announcement = announcement;
+      saveDb(db);
+      return redirectWithMessage(res, "/admin/settings", "Settings updated successfully.");
     }
 
     if (pathname === "/admin/bills") {
