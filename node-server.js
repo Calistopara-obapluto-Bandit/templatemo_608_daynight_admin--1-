@@ -50,6 +50,18 @@ function createUser({ email, password, role, fullName, unit }) {
   };
 }
 
+function createTenantInvite({ email, fullName, unit, inviteCode }) {
+  return {
+    id: randomId(12),
+    email: String(email || "").trim().toLowerCase(),
+    fullName: String(fullName || "").trim(),
+    unit: String(unit || "").trim(),
+    inviteCode: String(inviteCode || "").trim().toUpperCase(),
+    createdAt: new Date().toISOString(),
+    usedAt: "",
+  };
+}
+
 function createSession(userId) {
   const now = Date.now();
   return {
@@ -124,6 +136,16 @@ function normalizeDb(db) {
     users: Array.isArray(db && db.users)
       ? db.users.map((user) => ({ ...user, active: user.active !== false }))
       : [],
+    tenantInvites: Array.isArray(db && db.tenantInvites)
+      ? db.tenantInvites.map((invite) => ({
+          ...invite,
+          email: String(invite.email || "").trim().toLowerCase(),
+          fullName: normalizeLine(invite.fullName || "", 80),
+          unit: normalizeLine(invite.unit || "", 40),
+          inviteCode: normalizeInviteCode(invite.inviteCode),
+          usedAt: String(invite.usedAt || "").trim(),
+        }))
+      : [],
     sessions: Array.isArray(db && db.sessions) ? db.sessions : [],
     bills: Array.isArray(db && db.bills) ? db.bills : [],
     payments: Array.isArray(db && db.payments) ? db.payments : [],
@@ -150,7 +172,7 @@ function loadDb() {
       fullName: "Admin",
       unit: "",
     });
-    const db = { users: [admin], sessions: [], bills: [], payments: [], maintenanceRequests: [], projects: [], settings: defaultSettings() };
+    const db = { users: [admin], tenantInvites: [], sessions: [], bills: [], payments: [], maintenanceRequests: [], projects: [], settings: defaultSettings() };
     fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), "utf8");
   }
   return syncBillStatuses(normalizeDb(JSON.parse(fs.readFileSync(DB_PATH, "utf8"))));
@@ -321,6 +343,17 @@ function isValidDateInput(value) {
 
 function normalizeLine(value, maxLength) {
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, maxLength);
+}
+
+function normalizeInviteCode(value) {
+  return String(value || "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, 12);
+}
+
+function generateInviteCode() {
+  return crypto.randomBytes(4).toString("hex").toUpperCase();
 }
 
 function getBillStatus(bill) {
@@ -626,7 +659,7 @@ function loginView(error = "") {
             </div>
             <button type="submit" class="btn btn-primary">Sign In</button>
           </form>
-          <p class="login-footer" style="margin-top:1rem;">No account yet? <a href="/register">Create tenant account</a></p>
+          <p class="login-footer" style="margin-top:1rem;">Need access? <a href="/register">Use your tenant invite</a> or contact management for approval.</p>
         </div>
       </div>
     </div>`
@@ -651,21 +684,17 @@ function registerView(error = "") {
               </div>
             </div>
             <h1 class="login-title">Create tenant account</h1>
-            <p class="login-subtitle">Register to access your dashboard.</p>
+            <p class="login-subtitle">Only tenants approved by management can register with an invite code.</p>
           </div>
           ${err}
           <form class="login-form" method="post" action="/register">
             <div class="form-group">
-              <label class="form-label">Full Name</label>
-              <input name="full_name" type="text" class="form-input" placeholder="e.g. Adaeze Okafor" required />
-            </div>
-            <div class="form-group">
-              <label class="form-label">Unit</label>
-              <input name="unit" type="text" class="form-input" placeholder="e.g. Block B - 3" />
-            </div>
-            <div class="form-group">
               <label class="form-label">Email Address</label>
               <input name="email" type="email" class="form-input" placeholder="you@example.com" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Invite Code</label>
+              <input name="invite_code" type="text" class="form-input" maxlength="12" placeholder="Enter the code from management" required />
             </div>
             <div class="form-group">
               <label class="form-label">Password</label>
@@ -1839,6 +1868,9 @@ function adminAnalyticsPage(user, db, flash = "") {
 function adminTenantsPage(user, db, flash = "", filters = {}) {
   const query = normalizeLine(filters.q, 80);
   const statusFilter = normalizeLine(filters.status, 20);
+  const pendingInvites = [...db.tenantInvites]
+    .filter((invite) => !invite.usedAt)
+    .sort(compareNewestFirst);
   const tenants = db.users
     .filter((item) => item.role === "tenant")
     .filter((tenant) => !statusFilter || (statusFilter === "active" ? tenant.active !== false : tenant.active === false))
@@ -1847,6 +1879,16 @@ function adminTenantsPage(user, db, flash = "", filters = {}) {
   const activeTenants = tenants.filter((tenant) => tenant.active !== false);
   const inactiveTenants = tenants.filter((tenant) => tenant.active === false);
   const assignedUnits = new Set(activeTenants.map((tenant) => tenant.unit).filter(Boolean)).size;
+  const pendingInviteRows = pendingInvites.length
+    ? pendingInvites
+        .map((invite) => `<tr>
+          <td style="padding:0.9rem 0.75rem;"><strong>${escapeHtml(invite.fullName || "Pending tenant")}</strong><br /><span style="color:var(--text-secondary);">${escapeHtml(invite.email)}</span></td>
+          <td style="padding:0.9rem 0.75rem;">${escapeHtml(invite.unit || "Not assigned")}</td>
+          <td style="padding:0.9rem 0.75rem;"><code>${escapeHtml(invite.inviteCode)}</code></td>
+          <td style="padding:0.9rem 0.75rem;">${escapeHtml(formatDateTime(invite.createdAt))}</td>
+        </tr>`)
+        .join("")
+    : `<tr><td colspan="4" style="padding:1rem 0.75rem; color:var(--text-secondary);">No pending tenant approvals yet.</td></tr>`;
   const rows = tenants.length
     ? tenants
         .map((tenant) => {
@@ -1891,21 +1933,56 @@ function adminTenantsPage(user, db, flash = "", filters = {}) {
         <div class="stat-card"><div class="stat-label">Visible Tenants</div><div class="stat-value">${tenants.length}</div><div class="stat-change positive">Current search result</div></div>
         <div class="stat-card"><div class="stat-label">Active</div><div class="stat-value">${activeTenants.length}</div><div class="stat-change positive">Can still sign in</div></div>
         <div class="stat-card"><div class="stat-label">Inactive</div><div class="stat-value">${inactiveTenants.length}</div><div class="stat-change positive">Access paused</div></div>
-        <div class="stat-card"><div class="stat-label">Assigned Units</div><div class="stat-value">${assignedUnits}</div><div class="stat-change positive">Units linked to active tenants</div></div>
+        <div class="stat-card"><div class="stat-label">Pending Invites</div><div class="stat-value">${pendingInvites.length}</div><div class="stat-change positive">${assignedUnits} active units assigned</div></div>
       </div>
-      <div class="card" style="margin-bottom:1.5rem;">
-        <div class="card-header"><div><h3 class="card-title">Find Tenants</h3><p class="card-subtitle">Search by name, email, or unit and filter by access state</p></div></div>
-        <form method="get" action="/admin/tenants" class="control-grid">
-          <input name="q" type="text" class="form-input" value="${escapeHtml(query)}" placeholder="Search tenants" />
-          <select name="status" class="form-input">
-            <option value="">All statuses</option>
-            <option value="active" ${statusFilter === "active" ? "selected" : ""}>Active</option>
-            <option value="inactive" ${statusFilter === "inactive" ? "selected" : ""}>Inactive</option>
-          </select>
-          <button type="submit" class="btn btn-primary">Filter</button>
-        </form>
+      <div class="two-col">
+        <div class="card">
+          <div class="card-header"><div><h3 class="card-title">Approve Tenant Access</h3><p class="card-subtitle">Only approved tenants with an invite code can create accounts</p></div></div>
+          <form method="post" action="/admin/tenants/invite" style="padding:1rem 1.25rem; display:grid; gap:0.85rem;">
+            <div class="form-group"><label class="form-label">Full Name</label><input name="full_name" type="text" maxlength="80" class="form-input" placeholder="e.g. Adaeze Okafor" required /></div>
+            <div class="form-group"><label class="form-label">Email Address</label><input name="email" type="email" class="form-input" placeholder="tenant@example.com" required /></div>
+            <div class="form-group"><label class="form-label">Unit</label><input name="unit" type="text" maxlength="40" class="form-input" placeholder="e.g. Block B - 3" /></div>
+            <div class="form-group"><label class="form-label">Invite Code</label><input name="invite_code" type="text" maxlength="12" class="form-input" placeholder="Leave empty to auto-generate" /></div>
+            <button type="submit" class="btn btn-primary">Create Tenant Invite</button>
+          </form>
+        </div>
+        <div class="card">
+          <div class="card-header"><div><h3 class="card-title">Find Tenants</h3><p class="card-subtitle">Search by name, email, or unit and filter by access state</p></div></div>
+          <form method="get" action="/admin/tenants" class="control-grid" style="padding:1rem 1.25rem;">
+            <input name="q" type="text" class="form-input" value="${escapeHtml(query)}" placeholder="Search tenants" />
+            <select name="status" class="form-input">
+              <option value="">All statuses</option>
+              <option value="active" ${statusFilter === "active" ? "selected" : ""}>Active</option>
+              <option value="inactive" ${statusFilter === "inactive" ? "selected" : ""}>Inactive</option>
+            </select>
+            <button type="submit" class="btn btn-primary">Filter</button>
+          </form>
+          <div style="padding:0 1.25rem 1.25rem; display:grid; gap:0.9rem;">
+            <div><strong>Approved before signup:</strong> tenants must use the exact email and invite code you issue here.</div>
+            <div><strong>Pending approvals:</strong> share the code below with the approved tenant only.</div>
+            <div><strong>Existing tenants:</strong> you can still pause access or reset passwords from the board.</div>
+          </div>
+        </div>
       </div>
-      <div class="card card-accent">
+      <div class="card" style="margin-top:1.5rem;">
+        <div class="card-header"><div><h3 class="card-title">Pending Tenant Invites</h3><p class="card-subtitle">These people are approved to register but have not claimed access yet</p></div></div>
+        <div class="card-scroll">
+          <div class="card-scroll-inner" style="min-width:860px;">
+            <table style="width:100%; border-collapse:collapse;">
+              <thead>
+                <tr style="text-align:left; color:var(--text-secondary); border-bottom:1px solid var(--border);">
+                  <th style="padding:0.9rem 0.75rem;">Tenant</th>
+                  <th style="padding:0.9rem 0.75rem;">Unit</th>
+                  <th style="padding:0.9rem 0.75rem;">Invite Code</th>
+                  <th style="padding:0.9rem 0.75rem;">Created</th>
+                </tr>
+              </thead>
+              <tbody>${pendingInviteRows}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="card card-accent" style="margin-top:1.5rem;">
         <div class="card-header"><div><h3 class="card-title">Tenant Management Board</h3><p class="card-subtitle">Update names, assign units, pause access, or reset passwords</p></div></div>
         <div class="card-scroll">
           <div class="card-scroll-inner" style="min-width:1100px;">
@@ -2429,17 +2506,21 @@ const server = http.createServer(async (req, res) => {
       if (!isFormRequest(req)) return send(res, 415, registerView("Unsupported form submission."));
       const body = await readBody(req);
       const form = parseForm(body);
-      const fullName = String(form.full_name || "").trim();
-      const unit = String(form.unit || "").trim();
       const email = String(form.email || "").trim().toLowerCase();
+      const inviteCode = normalizeInviteCode(form.invite_code);
       const password = String(form.password || "");
-      if (!fullName || !email || !password) return send(res, 400, registerView("Please fill all required fields."));
+      if (!email || !inviteCode || !password) return send(res, 400, registerView("Please fill all required fields."));
       if (password.length < 6) return send(res, 400, registerView("Password must be at least 6 characters."));
 
       const db = loadDb();
       if (db.users.some((u) => u.email === email)) return send(res, 400, registerView("This email is already registered."));
-      const tenant = createUser({ email, password, role: "tenant", fullName, unit });
+      const invite = db.tenantInvites.find((item) => item.email === email && item.inviteCode === inviteCode && !item.usedAt);
+      if (!invite) {
+        return send(res, 403, registerView("Registration is only available for approved tenants with a valid invite code."));
+      }
+      const tenant = createUser({ email, password, role: "tenant", fullName: invite.fullName, unit: invite.unit });
       db.users.push(tenant);
+      invite.usedAt = new Date().toISOString();
       saveDb(db);
 
       const session = persistSession(tenant.id);
@@ -2593,6 +2674,40 @@ const server = http.createServer(async (req, res) => {
       }
       saveDb(db);
       return redirectWithMessage(res, "/admin/tenants", "Tenant record updated successfully.");
+    }
+
+    if (pathname === "/admin/tenants/invite") {
+      const user = requireRole(req, res, "admin");
+      if (!user) return;
+      if (method !== "POST") return sendText(res, 405, "Method Not Allowed", { Allow: "POST" });
+      if (!isFormRequest(req)) return redirectWithMessage(res, "/admin/tenants", "Unsupported tenant invite submission.");
+      const body = await readBody(req);
+      const form = parseForm(body);
+      const db = loadDb();
+      const fullName = normalizeLine(form.full_name, 80);
+      const email = String(form.email || "").trim().toLowerCase();
+      const unit = normalizeLine(form.unit, 40);
+      let inviteCode = normalizeInviteCode(form.invite_code);
+      if (!fullName || !email || !email.includes("@")) {
+        return redirectWithMessage(res, "/admin/tenants", "Please enter a valid tenant name and email before approving access.");
+      }
+      if (db.users.some((item) => item.email === email)) {
+        return redirectWithMessage(res, "/admin/tenants", "That email already belongs to a registered user.");
+      }
+      if (db.tenantInvites.some((item) => item.email === email && !item.usedAt)) {
+        return redirectWithMessage(res, "/admin/tenants", "That tenant already has a pending invite.");
+      }
+      if (!inviteCode) {
+        do {
+          inviteCode = generateInviteCode();
+        } while (db.tenantInvites.some((item) => item.inviteCode === inviteCode && !item.usedAt));
+      }
+      if (db.tenantInvites.some((item) => item.inviteCode === inviteCode && !item.usedAt)) {
+        return redirectWithMessage(res, "/admin/tenants", "Choose a different invite code because that one is already active.");
+      }
+      db.tenantInvites.push(createTenantInvite({ email, fullName, unit, inviteCode }));
+      saveDb(db);
+      return redirectWithMessage(res, "/admin/tenants", `Tenant invite created. Share code ${inviteCode} with ${fullName}.`);
     }
 
     if (pathname === "/admin/projects") {
