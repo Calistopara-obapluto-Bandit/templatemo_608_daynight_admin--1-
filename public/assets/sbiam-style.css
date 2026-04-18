@@ -987,6 +987,82 @@ textarea:focus-visible {
     margin-top: 0.1rem;
 }
 
+.priority-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1rem;
+}
+
+.priority-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    padding: 1.15rem;
+    border-radius: 16px;
+    border: 1px solid var(--border-color);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--bg-surface) 88%, transparent), color-mix(in srgb, var(--bg-primary) 95%, transparent));
+}
+
+.priority-card.warning {
+    border-color: rgba(245, 158, 11, 0.28);
+    background: linear-gradient(180deg, rgba(245, 158, 11, 0.12), color-mix(in srgb, var(--bg-primary) 94%, transparent));
+}
+
+.priority-card.accent {
+    border-color: rgba(14, 165, 233, 0.24);
+    background: linear-gradient(180deg, rgba(14, 165, 233, 0.12), color-mix(in srgb, var(--bg-primary) 94%, transparent));
+}
+
+.priority-card.orange {
+    border-color: rgba(249, 115, 22, 0.24);
+    background: linear-gradient(180deg, rgba(249, 115, 22, 0.11), color-mix(in srgb, var(--bg-primary) 94%, transparent));
+}
+
+.priority-card.success {
+    border-color: rgba(34, 197, 94, 0.22);
+    background: linear-gradient(180deg, rgba(34, 197, 94, 0.1), color-mix(in srgb, var(--bg-primary) 94%, transparent));
+}
+
+.priority-card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.priority-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.28rem 0.6rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--bg-primary) 86%, transparent);
+    border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+    color: var(--text-primary);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.priority-meta {
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    text-align: right;
+}
+
+.priority-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.priority-copy {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    line-height: 1.55;
+    flex: 1;
+}
+
 /* ===== Two Column Layout ===== */
 .two-col {
     display: grid;
@@ -1834,6 +1910,10 @@ tr:hover td {
     .kanban-board {
         grid-template-columns: repeat(2, 1fr);
     }
+
+    .priority-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
 @media (max-width: 992px) {
@@ -1992,6 +2072,19 @@ tr:hover td {
 
     .card-header .btn {
         width: 100%;
+    }
+
+    .priority-card {
+        padding: 1rem;
+    }
+
+    .priority-card-head {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .priority-meta {
+        text-align: left;
     }
 
     .two-col {

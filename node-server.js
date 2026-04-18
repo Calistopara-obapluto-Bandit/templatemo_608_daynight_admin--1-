@@ -840,8 +840,60 @@ function tenantDashboardView(user, db, flash = "") {
     .filter((request) => request.tenantId === user.id)
     .sort(compareNewestFirst);
   const openBills = bills.filter((bill) => getBillStatus(bill) !== "paid");
+  const pendingPayments = payments.filter((payment) => payment.status === "pending");
+  const openRequests = requests.filter((request) => request.status !== "resolved");
   const totalDue = openBills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
   const totalPaid = payments.filter((payment) => payment.status === "approved").reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
+  const nextBill = openBills
+    .slice()
+    .sort((a, b) => {
+      const aTime = isValidDateInput(a.dueDate) ? Date.parse(`${a.dueDate}T00:00:00Z`) : Number.POSITIVE_INFINITY;
+      const bTime = isValidDateInput(b.dueDate) ? Date.parse(`${b.dueDate}T00:00:00Z`) : Number.POSITIVE_INFINITY;
+      return aTime - bTime;
+    })[0] || null;
+  const tenantPriorities = [
+    {
+      tone: totalDue > 0 ? "warning" : "success",
+      title: totalDue > 0 ? "Outstanding balance needs attention" : "Your billing is in good shape",
+      detail: totalDue > 0
+        ? `${openBills.length} unpaid bill(s) totaling ${formatCurrency(totalDue)}${nextBill && isValidDateInput(nextBill.dueDate) ? `, next due ${formatDateOnly(`${nextBill.dueDate}T00:00:00Z`)}` : ""}.`
+        : "You do not have any unpaid bills at the moment.",
+      actionHref: "/tenant/bills",
+      actionLabel: totalDue > 0 ? "Review bills" : "View billing history",
+      meta: nextBill ? `Next bill: ${escapeHtml(nextBill.title)}` : "No open bills",
+    },
+    {
+      tone: pendingPayments.length ? "accent" : "success",
+      title: pendingPayments.length ? "Payments are waiting for review" : "No payments are waiting",
+      detail: pendingPayments.length
+        ? `${pendingPayments.length} submitted payment(s) are still pending approval from management.`
+        : "Your submitted payments have all been processed.",
+      actionHref: "/tenant/payments",
+      actionLabel: pendingPayments.length ? "Check payments" : "Open payments",
+      meta: payments[0] ? `Latest payment: ${formatCurrency(payments[0].amount)} • ${escapeHtml(payments[0].status)}` : "No payments submitted yet",
+    },
+    {
+      tone: openRequests.length ? "orange" : "success",
+      title: openRequests.length ? "Maintenance follow-up is still open" : "No open maintenance issues",
+      detail: openRequests.length
+        ? `${openRequests.length} maintenance request(s) still need attention or updates.`
+        : "You do not have any unresolved maintenance requests right now.",
+      actionHref: "/tenant/requests",
+      actionLabel: openRequests.length ? "Track requests" : "Create request",
+      meta: openRequests[0] ? `Latest request: ${escapeHtml(openRequests[0].title)}` : "Everything is currently resolved",
+    },
+  ];
+  const priorityCards = tenantPriorities
+    .map((item) => `<article class="priority-card ${item.tone}">
+      <div class="priority-card-head">
+        <span class="priority-pill">${escapeHtml(item.tone === "success" ? "Good" : item.tone === "warning" ? "Urgent" : item.tone === "orange" ? "Open" : "Review")}</span>
+        <span class="priority-meta">${escapeHtml(item.meta)}</span>
+      </div>
+      <h3 class="priority-title">${escapeHtml(item.title)}</h3>
+      <p class="priority-copy">${escapeHtml(item.detail)}</p>
+      <a href="${item.actionHref}" class="btn ${item.tone === "success" ? "btn-secondary" : "btn-primary"}">${escapeHtml(item.actionLabel)}</a>
+    </article>`)
+    .join("");
   const recentActivity = [];
   if (currentSession) {
     recentActivity.push(
@@ -981,6 +1033,18 @@ function tenantDashboardView(user, db, flash = "") {
             <div class="stat-label">Outstanding Bills</div>
             <div class="stat-value">${formatCurrency(totalDue)}</div>
             <div class="stat-change">${openBills.length} unpaid bills</div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom: 1.5rem;">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title">What Needs Attention</h3>
+              <p class="card-subtitle">The most important updates for your account right now.</p>
+            </div>
+          </div>
+          <div class="priority-grid">
+            ${priorityCards}
           </div>
         </div>
 
@@ -1535,8 +1599,72 @@ function adminDashboardView(user, db, flash = "") {
   const payments = [...db.payments].sort(compareNewestFirst);
   const maintenanceRequests = [...db.maintenanceRequests].sort(compareNewestFirst);
   const openBills = bills.filter((bill) => getBillStatus(bill) !== "paid");
+  const pendingPayments = payments.filter((payment) => payment.status === "pending");
+  const openMaintenance = maintenanceRequests.filter((request) => request.status !== "resolved");
+  const pendingInvites = db.tenantInvites.filter((invite) => !invite.usedAt).sort(compareNewestFirst);
   const totalOutstanding = openBills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
   const approvedPayments = payments.filter((payment) => payment.status === "approved").reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
+  const latestPendingPayment = pendingPayments[0] || null;
+  const latestOpenBill = openBills[0] || null;
+  const latestOpenMaintenance = openMaintenance[0] || null;
+  const latestPendingInvite = pendingInvites[0] || null;
+  const adminPriorities = [
+    {
+      tone: pendingPayments.length ? "warning" : "success",
+      label: pendingPayments.length ? "Urgent" : "Clear",
+      title: pendingPayments.length ? "Payments are waiting for approval" : "Payment review queue is clear",
+      detail: pendingPayments.length
+        ? `${pendingPayments.length} payment submission(s) still need a decision from management.`
+        : "There are no payment approvals waiting right now.",
+      meta: latestPendingPayment ? `${formatCurrency(latestPendingPayment.amount)} pending` : "No pending payments",
+      href: "/admin/payments",
+      action: pendingPayments.length ? "Review payments" : "Open payments",
+    },
+    {
+      tone: openBills.length ? "accent" : "success",
+      label: openBills.length ? "Watch" : "Clear",
+      title: openBills.length ? "Outstanding bills need follow-up" : "No unpaid bills need follow-up",
+      detail: openBills.length
+        ? `${openBills.length} unpaid bill(s) are still open, totaling ${formatCurrency(totalOutstanding)}.`
+        : "All current bills are settled.",
+      meta: latestOpenBill ? escapeHtml(latestOpenBill.title) : "No open bills",
+      href: "/admin/bills",
+      action: openBills.length ? "Open bills" : "View bills",
+    },
+    {
+      tone: openMaintenance.length ? "orange" : "success",
+      label: openMaintenance.length ? "Open" : "Clear",
+      title: openMaintenance.length ? "Maintenance queue needs attention" : "Maintenance queue is under control",
+      detail: openMaintenance.length
+        ? `${openMaintenance.length} maintenance request(s) are still unresolved.`
+        : "There are no unresolved maintenance issues right now.",
+      meta: latestOpenMaintenance ? escapeHtml(latestOpenMaintenance.title) : "No open requests",
+      href: "/admin/maintenance",
+      action: openMaintenance.length ? "Track maintenance" : "View maintenance",
+    },
+    {
+      tone: pendingInvites.length ? "warning" : "success",
+      label: pendingInvites.length ? "Pending" : "Clear",
+      title: pendingInvites.length ? "Tenant invites still need follow-up" : "All tenant invites are resolved",
+      detail: pendingInvites.length
+        ? `${pendingInvites.length} approved invite(s) have not been claimed yet.`
+        : "There are no outstanding tenant invites right now.",
+      meta: latestPendingInvite ? escapeHtml(latestPendingInvite.fullName || latestPendingInvite.email) : "No pending invites",
+      href: "/admin/tenants",
+      action: pendingInvites.length ? "Manage tenants" : "Open tenants",
+    },
+  ];
+  const adminActionCenter = adminPriorities
+    .map((item) => `<article class="priority-card ${item.tone}">
+      <div class="priority-card-head">
+        <span class="priority-pill">${escapeHtml(item.label)}</span>
+        <span class="priority-meta">${item.meta}</span>
+      </div>
+      <h3 class="priority-title">${escapeHtml(item.title)}</h3>
+      <p class="priority-copy">${escapeHtml(item.detail)}</p>
+      <a href="${item.href}" class="btn ${item.tone === "success" ? "btn-secondary" : "btn-primary"}">${escapeHtml(item.action)}</a>
+    </article>`)
+    .join("");
   const recentActivity = [];
   if (tenants[0]) {
     recentActivity.push(
@@ -1722,6 +1850,18 @@ function adminDashboardView(user, db, flash = "") {
             <div class="stat-label">Approved Payments</div>
             <div class="stat-value">${formatCurrency(approvedPayments)}</div>
             <div class="stat-change">${payments.length} payment records submitted</div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom: 1.5rem;">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title">Admin Action Center</h3>
+              <p class="card-subtitle">The highest-priority operational work across billing, tenants, and maintenance.</p>
+            </div>
+          </div>
+          <div class="priority-grid">
+            ${adminActionCenter}
           </div>
         </div>
 
