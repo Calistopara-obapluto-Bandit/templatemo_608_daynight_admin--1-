@@ -491,25 +491,62 @@ function renderShellChrome({
 }) {
   const avatar = escapeHtml((user.fullName || "A").slice(0, 1).toUpperCase());
   const name = escapeHtml(user.fullName || "User");
+  const settingsLink = user.role === "admin"
+    ? {
+        href: "/admin/settings",
+        label: "Settings",
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06A2 2 0 1 1 4.21 16.96l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06A2 2 0 1 1 7.04 4.3l.06.06A1.65 1.65 0 0 0 8.92 4a1.65 1.65 0 0 0 1-1.51V2a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06A2 2 0 1 1 19.79 7.04l-.06.06A1.65 1.65 0 0 0 19.4 9c.2.61.79 1.02 1.43 1H21a2 2 0 1 1 0 4h-.17c-.64 0-1.23.41-1.43 1z"/></svg>',
+      }
+    : null;
+  const isItemActive = (item) => activePath === item.href || (Array.isArray(item.children) && item.children.some((child) => activePath === child.href));
   const links = showNavLinks
     ? navLinks
         .map(
-          (item) => `<div class="nav-item">
-            <a href="${item.href}" class="nav-link${activePath === item.href ? " active" : ""}">
-              ${item.icon}
-              ${escapeHtml(item.label)}
-            </a>
-          </div>`
+          (item) => item.children && item.children.length
+            ? `<div class="nav-item nav-item-has-dropdown">
+                <a href="${item.href}" class="nav-link${isItemActive(item) ? " active" : ""}">
+                  ${item.icon}
+                  ${escapeHtml(item.label)}
+                  <svg class="dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                </a>
+                <div class="dropdown-menu">
+                  ${item.children
+                    .map((child) => `<a href="${child.href}" class="${activePath === child.href ? "active" : ""}">
+                      ${child.icon}
+                      <span>${escapeHtml(child.label)}</span>
+                    </a>`)
+                    .join("")}
+                </div>
+              </div>`
+            : `<div class="nav-item">
+                <a href="${item.href}" class="nav-link${isItemActive(item) ? " active" : ""}">
+                  ${item.icon}
+                  ${escapeHtml(item.label)}
+                </a>
+              </div>`
         )
         .join("")
     : "";
   const mobileLinks = showMobileMenu
     ? navLinks
         .map(
-          (item) => `<a href="${item.href}" class="${activePath === item.href ? "active" : ""}">
-            ${item.icon}
-            ${escapeHtml(item.label)}
-          </a>`
+          (item) => item.children && item.children.length
+            ? `<div class="mobile-menu-group">
+                <div class="mobile-menu-group-label">
+                  ${item.icon}
+                  <span>${escapeHtml(item.label)}</span>
+                </div>
+                ${item.children
+                  .map((child) => `<a href="${child.href}" class="${activePath === child.href ? "active" : ""}">
+                    ${child.icon}
+                    ${escapeHtml(child.label)}
+                  </a>`)
+                  .join("")}
+              </div>`
+            : `<a href="${item.href}" class="${activePath === item.href ? "active" : ""}">
+                ${item.icon}
+                ${escapeHtml(item.label)}
+              </a>`
         )
         .join("")
     : "";
@@ -543,6 +580,10 @@ function renderShellChrome({
           ${mobileLinks}
         </nav>
         <div class="mobile-menu-footer">
+          ${settingsLink ? `<a href="${settingsLink.href}" class="mobile-menu-settings">
+            ${settingsLink.icon}
+            ${escapeHtml(settingsLink.label)}
+          </a>` : ""}
           <a href="/logout" class="mobile-logout-btn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
@@ -565,13 +606,23 @@ function renderShellChrome({
           </div>
           <div class="nav-right">
             ${themeToggle}
-            <button class="user-menu">
-              <div class="user-avatar">${avatar}</div>
-              <span class="user-name">${name}</span>
-            </button>
-            <a href="/logout" class="btn-logout" title="Logout">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-            </a>
+            <div class="user-menu-wrap">
+              <button class="user-menu">
+                <div class="user-avatar">${avatar}</div>
+                <span class="user-name">${name}</span>
+                <svg class="dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+              <div class="dropdown-menu user-dropdown-menu">
+                ${settingsLink ? `<a href="${settingsLink.href}" class="${activePath === settingsLink.href ? "active" : ""}">
+                  ${settingsLink.icon}
+                  <span>${escapeHtml(settingsLink.label)}</span>
+                </a>` : ""}
+                <a href="/logout">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                  <span>Logout</span>
+                </a>
+              </div>
+            </div>
             ${showMobileMenu ? `<button class="mobile-menu-btn" onclick="toggleMobileMenu()">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <line x1="3" y1="12" x2="21" y2="12"/>
@@ -1373,29 +1424,38 @@ function adminNavLinks() {
       icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
     },
     {
-      href: "/admin/bills",
-      label: "Bills",
-      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="13" y2="15"/></svg>',
-    },
-    {
       href: "/admin/payments",
       label: "Payments",
       icon: `<svg viewBox="0 0 24 24" fill="none">${PAYMENT_SYMBOL_MARKUP}</svg>`,
-    },
-    {
-      href: "/admin/maintenance",
-      label: "Maintenance",
-      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+      children: [
+        {
+          href: "/admin/payments",
+          label: "Payments",
+          icon: `<svg viewBox="0 0 24 24" fill="none">${PAYMENT_SYMBOL_MARKUP}</svg>`,
+        },
+        {
+          href: "/admin/bills",
+          label: "Bills",
+          icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="13" y2="15"/></svg>',
+        },
+      ],
     },
     {
       href: "/admin/projects",
       label: "Projects",
       icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18"/><path d="M6 3h12l3 4v14H3V7l3-4z"/><path d="M9 12h6"/><path d="M9 16h4"/></svg>',
-    },
-    {
-      href: "/admin/settings",
-      label: "Settings",
-      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06A2 2 0 1 1 4.21 16.96l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06A2 2 0 1 1 7.04 4.3l.06.06A1.65 1.65 0 0 0 8.92 4a1.65 1.65 0 0 0 1-1.51V2a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06A2 2 0 1 1 19.79 7.04l-.06.06A1.65 1.65 0 0 0 19.4 9c.2.61.79 1.02 1.43 1H21a2 2 0 1 1 0 4h-.17c-.64 0-1.23.41-1.43 1z"/></svg>',
+      children: [
+        {
+          href: "/admin/projects",
+          label: "Projects",
+          icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18"/><path d="M6 3h12l3 4v14H3V7l3-4z"/><path d="M9 12h6"/><path d="M9 16h4"/></svg>',
+        },
+        {
+          href: "/admin/maintenance",
+          label: "Maintenance",
+          icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+        },
+      ],
     },
   ];
 }

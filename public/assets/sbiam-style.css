@@ -202,6 +202,11 @@ textarea:focus-visible {
     position: relative;
 }
 
+.nav-item-has-dropdown .nav-link,
+.user-menu {
+    padding-right: 0.75rem;
+}
+
 .nav-link {
     display: flex;
     align-items: center;
@@ -268,16 +273,30 @@ textarea:focus-visible {
 }
 
 .dropdown-menu a {
-    display: block;
-    padding: 0.625rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.7rem 1rem;
     color: var(--text-secondary);
     font-size: 0.875rem;
     transition: var(--transition);
 }
 
+.dropdown-menu a svg {
+    width: 18px;
+    height: 18px;
+    opacity: 0.75;
+    flex-shrink: 0;
+}
+
 .dropdown-menu a:hover {
     color: var(--text-primary);
     background: var(--bg-surface);
+}
+
+.dropdown-menu a.active {
+    color: var(--accent);
+    background: var(--accent-light);
 }
 
 .dropdown-menu a:first-child {
@@ -353,6 +372,24 @@ textarea:focus-visible {
     border-color: var(--accent);
 }
 
+.user-menu-wrap {
+    position: relative;
+}
+
+.user-menu-wrap:hover .dropdown-menu,
+.user-menu-wrap:focus-within .dropdown-menu,
+.nav-item:focus-within .dropdown-menu {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+}
+
+.user-menu-wrap:hover .dropdown-arrow,
+.user-menu-wrap:focus-within .dropdown-arrow,
+.nav-item:focus-within .dropdown-arrow {
+    transform: rotate(180deg);
+}
+
 .user-avatar {
     width: 32px;
     height: 32px;
@@ -372,26 +409,10 @@ textarea:focus-visible {
     color: var(--text-primary);
 }
 
-/* Logout Button */
-.btn-logout {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    border-radius: 8px;
-    color: var(--text-secondary);
-    transition: var(--transition);
-}
-
-.btn-logout:hover {
-    background: rgba(239, 68, 68, 0.1);
-    color: var(--danger);
-}
-
-.btn-logout svg {
-    width: 18px;
-    height: 18px;
+.user-dropdown-menu {
+    right: 0;
+    left: auto;
+    min-width: 190px;
 }
 
 /* ===== Page Header ===== */
@@ -1788,10 +1809,12 @@ tr:hover td {
 
     .nav-right {
         gap: 0.5rem;
+        padding-left: 0;
+        border-left: none;
     }
 
     .nav-right .theme-toggle,
-    .nav-right .btn-logout {
+    .user-menu-wrap {
         display: none;
     }
 
@@ -2007,6 +2030,32 @@ tr:hover td {
     transition: var(--transition);
 }
 
+.mobile-menu-group {
+    margin-bottom: 0.75rem;
+}
+
+.mobile-menu-group-label {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.35rem 1rem 0.55rem;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.mobile-menu-group-label svg {
+    width: 18px;
+    height: 18px;
+    opacity: 0.7;
+}
+
+.mobile-menu-group a {
+    margin-left: 0.35rem;
+}
+
 .mobile-menu-nav a:hover {
     background: var(--bg-surface);
     color: var(--text-primary);
@@ -2026,6 +2075,31 @@ tr:hover td {
 .mobile-menu-footer {
     padding: 1rem 1.25rem 1.25rem;
     border-top: 1px solid var(--border-color);
+}
+
+.mobile-menu-settings {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.75rem;
+    font-size: 0.9375rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    background: var(--bg-surface);
+    border-radius: 8px;
+    transition: var(--transition);
+}
+
+.mobile-menu-settings:hover {
+    background: var(--accent-light);
+    color: var(--accent);
+}
+
+.mobile-menu-settings svg {
+    width: 20px;
+    height: 20px;
 }
 
 .mobile-logout-btn {
@@ -2060,6 +2134,15 @@ tr:hover td {
 @media (max-width: 600px) {
     .nav-container {
         padding: 0 0.75rem;
+    }
+
+    .mobile-menu {
+        width: 100vw;
+        max-width: none;
+    }
+
+    .mobile-menu-nav {
+        padding: 0.85rem;
     }
 
     .logo {
