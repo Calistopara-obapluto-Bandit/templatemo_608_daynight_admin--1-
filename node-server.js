@@ -716,6 +716,33 @@ function renderActivityFeed(items, emptyMessage) {
   return items.length ? items.join("") : `<div style="padding:1rem; color:var(--text-secondary);">${escapeHtml(emptyMessage)}</div>`;
 }
 
+function renderReminderSection(title, subtitle, items, emptyMessage) {
+  const body = items.length
+    ? items
+        .map((item) => `<article class="reminder-card ${escapeHtml(item.tone || "accent")}">
+          <div class="reminder-head">
+            <span class="reminder-label">${escapeHtml(item.label || "Reminder")}</span>
+            ${item.meta ? `<span class="reminder-meta">${escapeHtml(item.meta)}</span>` : ""}
+          </div>
+          <h3 class="reminder-title">${escapeHtml(item.title)}</h3>
+          <p class="reminder-copy">${escapeHtml(item.detail)}</p>
+          ${item.href ? `<a href="${item.href}" class="btn ${item.tone === "success" ? "btn-secondary" : "btn-primary"}">${escapeHtml(item.actionLabel || "Open")}</a>` : ""}
+        </article>`)
+        .join("")
+    : `<div class="reminder-empty">${escapeHtml(emptyMessage)}</div>`;
+  return `<div class="card" style="margin-bottom: 1.5rem;">
+    <div class="card-header">
+      <div>
+        <h3 class="card-title">${escapeHtml(title)}</h3>
+        <p class="card-subtitle">${escapeHtml(subtitle)}</p>
+      </div>
+    </div>
+    <div class="reminder-grid">
+      ${body}
+    </div>
+  </div>`;
+}
+
 function renderAnnouncementCard(message, title = "Announcement", updatedAt = "") {
   if (!String(message || "").trim()) return "";
   return `<div class="card" style="margin-bottom:1.5rem; border-color: rgba(56, 189, 248, 0.24); background: linear-gradient(135deg, rgba(56,189,248,0.10), rgba(34,197,94,0.06));">
@@ -842,8 +869,10 @@ function tenantDashboardView(user, db, flash = "") {
   const openBills = bills.filter((bill) => getBillStatus(bill) !== "paid");
   const pendingPayments = payments.filter((payment) => payment.status === "pending");
   const openRequests = requests.filter((request) => request.status !== "resolved");
+  const resolvedRequests = requests.filter((request) => request.status === "resolved");
   const totalDue = openBills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
   const totalPaid = payments.filter((payment) => payment.status === "approved").reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
+  const todayTs = Date.now();
   const nextBill = openBills
     .slice()
     .sort((a, b) => {
@@ -851,6 +880,68 @@ function tenantDashboardView(user, db, flash = "") {
       const bTime = isValidDateInput(b.dueDate) ? Date.parse(`${b.dueDate}T00:00:00Z`) : Number.POSITIVE_INFINITY;
       return aTime - bTime;
     })[0] || null;
+  const overdueBills = openBills.filter((bill) => isValidDateInput(bill.dueDate) && Date.parse(`${bill.dueDate}T23:59:59Z`) < todayTs);
+  const upcomingBills = openBills.filter((bill) => {
+    if (!isValidDateInput(bill.dueDate)) return false;
+    const dueTs = Date.parse(`${bill.dueDate}T23:59:59Z`);
+    const daysAway = Math.ceil((dueTs - todayTs) / 86400000);
+    return daysAway >= 0 && daysAway <= 7;
+  });
+  const tenantReminders = [];
+  if (overdueBills.length) {
+    tenantReminders.push({
+      tone: "warning",
+      label: "Due now",
+      title: "You have overdue bills",
+      detail: `${overdueBills.length} bill(s) are past due. Paying them first will keep your account in good standing.`,
+      meta: `Outstanding ${formatCurrency(overdueBills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0))}`,
+      href: "/tenant/bills",
+      actionLabel: "Pay attention",
+    });
+  } else if (upcomingBills.length) {
+    tenantReminders.push({
+      tone: "accent",
+      label: "Upcoming",
+      title: "A bill is due soon",
+      detail: `${upcomingBills.length} bill(s) will be due within the next 7 days.`,
+      meta: nextBill && isValidDateInput(nextBill.dueDate) ? `Next due ${formatDateOnly(`${nextBill.dueDate}T00:00:00Z`)}` : "Review schedule",
+      href: "/tenant/bills",
+      actionLabel: "Review bills",
+    });
+  }
+  if (pendingPayments.length) {
+    tenantReminders.push({
+      tone: "accent",
+      label: "Pending",
+      title: "A payment is waiting for approval",
+      detail: `${pendingPayments.length} payment submission(s) are still being reviewed by management.`,
+      meta: `Latest ${formatCurrency(pendingPayments[0].amount)}`,
+      href: "/tenant/payments",
+      actionLabel: "Check status",
+    });
+  }
+  if (resolvedRequests.length) {
+    tenantReminders.push({
+      tone: "success",
+      label: "Update",
+      title: "A maintenance request has been resolved",
+      detail: `Management marked ${resolvedRequests[0].title} as resolved. Review it and reopen only if needed.`,
+      meta: formatDateTime(resolvedRequests[0].createdAt),
+      href: "/tenant/requests",
+      actionLabel: "View requests",
+    });
+  }
+  if (db.settings.announcement && db.settings.announcementUpdatedAt) {
+    tenantReminders.push({
+      tone: "orange",
+      label: "Notice",
+      title: "Management posted a lodge update",
+      detail: db.settings.announcement,
+      meta: formatDateTime(db.settings.announcementUpdatedAt),
+      href: "/tenant/dashboard",
+      actionLabel: "Read update",
+    });
+  }
   const tenantPriorities = [
     {
       tone: totalDue > 0 ? "warning" : "success",
@@ -1008,6 +1099,12 @@ function tenantDashboardView(user, db, flash = "") {
       <main class="main-content">
         ${flashBanner}
         ${renderAnnouncementCard(db.settings.announcement, "Lodge Update", db.settings.announcementUpdatedAt)}
+        ${renderReminderSection(
+          "Notifications & Reminders",
+          "Helpful prompts based on your bills, requests, and recent management updates.",
+          tenantReminders,
+          "You are all caught up. New reminders will appear here when something needs your attention."
+        )}
         <div class="page-header">
           <h1 class="greeting">Welcome, ${escapeHtml(user.fullName)}</h1>
           <p class="greeting-sub">Your account is live for <strong>${escapeHtml(user.unit || "Unit not assigned yet")}</strong>.</p>
@@ -1608,6 +1705,64 @@ function adminDashboardView(user, db, flash = "") {
   const latestOpenBill = openBills[0] || null;
   const latestOpenMaintenance = openMaintenance[0] || null;
   const latestPendingInvite = pendingInvites[0] || null;
+  const todayTs = Date.now();
+  const overdueBills = openBills.filter((bill) => isValidDateInput(bill.dueDate) && Date.parse(`${bill.dueDate}T23:59:59Z`) < todayTs);
+  const adminReminders = [];
+  if (pendingPayments.length) {
+    adminReminders.push({
+      tone: "warning",
+      label: "Approval",
+      title: "Pending payments need review",
+      detail: `${pendingPayments.length} payment submission(s) are still waiting for approval or rejection.`,
+      meta: latestPendingPayment ? `${formatCurrency(latestPendingPayment.amount)} latest` : "Review queue",
+      href: "/admin/payments",
+      actionLabel: "Review now",
+    });
+  }
+  if (overdueBills.length) {
+    adminReminders.push({
+      tone: "accent",
+      label: "Overdue",
+      title: "Some tenant bills are past due",
+      detail: `${overdueBills.length} bill(s) are overdue and may need follow-up with tenants.`,
+      meta: formatCurrency(overdueBills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0)),
+      href: "/admin/bills",
+      actionLabel: "Check bills",
+    });
+  }
+  if (openMaintenance.length) {
+    adminReminders.push({
+      tone: "orange",
+      label: "Open",
+      title: "Maintenance requests still need attention",
+      detail: `${openMaintenance.length} unresolved request(s) remain in the maintenance queue.`,
+      meta: latestOpenMaintenance ? latestOpenMaintenance.title : "Open queue",
+      href: "/admin/maintenance",
+      actionLabel: "Open queue",
+    });
+  }
+  if (pendingInvites.length) {
+    adminReminders.push({
+      tone: "warning",
+      label: "Invite",
+      title: "Approved tenant invites are unclaimed",
+      detail: `${pendingInvites.length} invite(s) have been created but not yet used by the approved tenants.`,
+      meta: latestPendingInvite ? latestPendingInvite.fullName || latestPendingInvite.email : "Pending invites",
+      href: "/admin/tenants",
+      actionLabel: "Manage invites",
+    });
+  }
+  if (!db.settings.announcement) {
+    adminReminders.push({
+      tone: "success",
+      label: "Tip",
+      title: "Post a short update for tenants",
+      detail: "A current announcement helps tenants notice billing or operations updates without contacting management.",
+      meta: "Admin settings",
+      href: "/admin/settings",
+      actionLabel: "Open settings",
+    });
+  }
   const adminPriorities = [
     {
       tone: pendingPayments.length ? "warning" : "success",
@@ -1825,6 +1980,12 @@ function adminDashboardView(user, db, flash = "") {
       ${shell.topNav}
       <main class="main-content">
         ${flashBanner}
+        ${renderReminderSection(
+          "Notifications & Reminders",
+          "Operational prompts to help management stay ahead of approvals, follow-ups, and tenant communication.",
+          adminReminders,
+          "Operations look clear right now. New reminders will appear when follow-up is needed."
+        )}
         <div class="page-header">
           <h1 class="greeting">Welcome back, ${escapeHtml(user.fullName || "Admin")}</h1>
           <p class="greeting-sub">This dashboard now uses your live tenant and session data.</p>
