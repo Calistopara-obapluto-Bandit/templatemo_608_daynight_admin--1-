@@ -599,20 +599,30 @@ function renderShellChrome({
   const topNav = `<nav class="top-nav">
         <div class="nav-container">
           <div class="nav-left">
-            <a href="${dashboardPath}" class="logo">
+            <a href="${dashboardPath}" class="logo logo-panel">
               <div class="logo-icon logo-mark">GT</div><div class="logo-text"><div class="logo-name">Godstime Lodge</div><div class="logo-sub">${escapeHtml(logoSub || roleLabel)}</div></div>
             </a>
-            ${navMenu}
+            ${navMenu ? `<div class="nav-pills-wrap">${navMenu}</div>` : ""}
           </div>
           <div class="nav-right">
             ${themeToggle}
             <div class="user-menu-wrap">
-              <button class="user-menu">
+              <button class="user-menu" type="button">
                 <div class="user-avatar">${avatar}</div>
-                <span class="user-name">${name}</span>
+                <div class="user-meta">
+                  <span class="user-name">${name}</span>
+                  <span class="user-role">${escapeHtml(roleLabel)}</span>
+                </div>
                 <svg class="dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
               </button>
               <div class="dropdown-menu user-dropdown-menu">
+                <div class="user-dropdown-head">
+                  <div class="user-avatar user-avatar-large">${avatar}</div>
+                  <div>
+                    <div class="user-dropdown-name">${name}</div>
+                    <div class="user-dropdown-role">${escapeHtml(roleLabel)}</div>
+                  </div>
+                </div>
                 ${settingsLink ? `<a href="${settingsLink.href}" class="${activePath === settingsLink.href ? "active" : ""}">
                   ${settingsLink.icon}
                   <span>${escapeHtml(settingsLink.label)}</span>
