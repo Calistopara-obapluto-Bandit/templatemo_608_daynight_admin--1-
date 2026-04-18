@@ -220,6 +220,10 @@ function normalizeTenantEmail(fullName) {
     return `${base || 'tenant'}.tn@gtlodge.com`;
 }
 
+function looksLikeEmail(value) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+}
+
 function initTenantEmailForms() {
     const forms = document.querySelectorAll('[data-tenant-email-form]');
     if (!forms.length) return;
@@ -235,9 +239,17 @@ function initTenantEmailForms() {
         const updatePreview = () => {
             if (!previewEl) return;
             const fullName = (nameInput?.value || '').trim();
-            previewEl.textContent = fullName
-                ? `Generated email: ${normalizeTenantEmail(fullName)}`
-                : 'Your lodge email will be generated from your name.';
+            if (!fullName) {
+                previewEl.textContent = 'Your lodge email will be generated from your name.';
+                return;
+            }
+
+            if (looksLikeEmail(fullName)) {
+                previewEl.textContent = 'Enter your full name here. Your lodge email will be generated automatically.';
+                return;
+            }
+
+            previewEl.textContent = `Generated email: ${normalizeTenantEmail(fullName)}`;
         };
 
         const setStatus = (state, message) => {
