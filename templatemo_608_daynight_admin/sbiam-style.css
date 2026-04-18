@@ -1662,6 +1662,17 @@ tr:hover td {
     .nav-container {
         padding: 0.65rem 1rem;
         gap: 0.85rem;
+        min-height: 70px;
+    }
+
+    .nav-left {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .nav-right {
+        padding-left: 0;
+        border-left: none;
     }
     
     .nav-menu {
@@ -1685,6 +1696,24 @@ tr:hover td {
 }
 
 @media (max-width: 768px) {
+    .nav-container {
+        padding: 0.55rem 0.75rem;
+        min-height: 60px;
+    }
+
+    .logo-panel {
+        padding: 0.35rem 0.5rem;
+        border-radius: 14px;
+    }
+
+    .logo-name {
+        white-space: nowrap;
+    }
+
+    .logo-sub {
+        display: none;
+    }
+
     .stats-grid {
         grid-template-columns: 1fr;
     }
@@ -1721,8 +1750,21 @@ tr:hover td {
 
 @media (max-width: 600px) {
     .nav-container {
-        padding: 0 0.6rem;
+        padding: 0.5rem 0.6rem;
         min-height: 58px;
+    }
+
+    .logo-panel {
+        max-width: calc(100vw - 5.5rem);
+    }
+
+    .logo-text {
+        min-width: 0;
+    }
+
+    .logo-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     .mobile-menu {
@@ -1760,6 +1802,18 @@ tr:hover td {
     display: none;
     padding: 0.5rem;
     color: var(--text-primary);
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+    border: 1px solid color-mix(in srgb, var(--border-color) 84%, transparent);
+    background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+    flex-shrink: 0;
+}
+
+.admin-priority-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .mobile-menu-btn svg {

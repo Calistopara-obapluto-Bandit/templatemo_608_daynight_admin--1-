@@ -2021,7 +2021,7 @@ function adminDashboardView(user, db, flash = "") {
               <p class="card-subtitle">The highest-priority operational work across billing, tenants, and maintenance.</p>
             </div>
           </div>
-          <div class="priority-grid">
+          <div class="priority-grid admin-priority-grid">
             ${adminActionCenter}
           </div>
         </div>

@@ -993,6 +993,10 @@ textarea:focus-visible {
     gap: 1rem;
 }
 
+.admin-priority-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .priority-card {
     display: flex;
     flex-direction: column;
@@ -1997,6 +2001,10 @@ tr:hover td {
         grid-template-columns: 1fr;
     }
 
+    .admin-priority-grid {
+        grid-template-columns: 1fr;
+    }
+
     .reminder-grid {
         grid-template-columns: 1fr;
     }
@@ -2015,10 +2023,14 @@ tr:hover td {
 
     .nav-left {
         gap: 0.9rem;
+        flex: 1;
+        min-width: 0;
     }
 
     .nav-right {
         gap: 0.65rem;
+        padding-left: 0;
+        border-left: none;
     }
 
     .nav-menu {
@@ -2051,7 +2063,7 @@ tr:hover td {
 
 @media (max-width: 768px) {
     .nav-container {
-        padding: 0 0.75rem;
+        padding: 0.55rem 0.75rem;
         min-height: 60px;
     }
 
@@ -2065,7 +2077,7 @@ tr:hover td {
     }
 
     .logo-panel {
-        padding: 0.35rem 0.45rem;
+        padding: 0.35rem 0.5rem;
         border-radius: 14px;
     }
 
@@ -2076,10 +2088,11 @@ tr:hover td {
 
     .logo-name {
         font-size: 0.9rem;
+        white-space: nowrap;
     }
 
     .logo-sub {
-        font-size: 0.65rem;
+        display: none;
     }
 
     .nav-right {
@@ -2236,6 +2249,14 @@ tr:hover td {
     display: none;
     padding: 0.5rem;
     color: var(--text-primary);
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+    border: 1px solid color-mix(in srgb, var(--border-color) 84%, transparent);
+    background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+    flex-shrink: 0;
 }
 
 .mobile-menu-btn svg {
@@ -2535,8 +2556,21 @@ tr:hover td {
 
 @media (max-width: 600px) {
     .nav-container {
-        padding: 0 0.6rem;
+        padding: 0.5rem 0.6rem;
         min-height: 58px;
+    }
+
+    .logo-panel {
+        max-width: calc(100vw - 5.5rem);
+    }
+
+    .logo-text {
+        min-width: 0;
+    }
+
+    .logo-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     .mobile-menu {
