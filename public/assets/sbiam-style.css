@@ -1354,6 +1354,14 @@ textarea:focus-visible {
     white-space: nowrap;
 }
 
+.status-timeline-actor {
+    font-size: 0.72rem;
+    padding: 0.15rem 0.45rem;
+    border-radius: 999px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+}
+
 .status-timeline-content p {
     font-size: 0.875rem;
     color: var(--text-secondary);

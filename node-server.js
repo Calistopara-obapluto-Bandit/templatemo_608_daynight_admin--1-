@@ -102,12 +102,13 @@ function createPayment({ tenantId, billId, amount, note }) {
         status: "pending",
         detail: "Payment submitted and waiting for review.",
         at: createdAt,
+        actor: "tenant",
       },
     ],
   };
 }
 
-function createMaintenanceRequest({ tenantId, title, description }) {
+function createMaintenanceRequest({ tenantId, title, description, evidenceNote = "" }) {
   const createdAt = new Date().toISOString();
   const slaHours = 72;
   return {
@@ -115,6 +116,7 @@ function createMaintenanceRequest({ tenantId, title, description }) {
     tenantId,
     title: String(title || "").trim(),
     description: String(description || "").trim(),
+    evidenceNote: normalizeLine(evidenceNote || "", 160),
     status: "open",
     createdAt,
     slaHours,
@@ -127,6 +129,7 @@ function createMaintenanceRequest({ tenantId, title, description }) {
         status: "open",
         detail: "Maintenance request submitted.",
         at: createdAt,
+        actor: "tenant",
       },
     ],
   };
@@ -193,6 +196,7 @@ function normalizeDb(db) {
           ...request,
           title: normalizeLine(request.title || "", 80),
           description: normalizeLine(request.description || "", 400),
+          evidenceNote: normalizeLine(request.evidenceNote || "", 160),
           status: String(request.status || "open").trim() || "open",
           createdAt: String(request.createdAt || "").trim(),
           slaHours: Math.max(1, Number(request.slaHours) || 72),
@@ -482,6 +486,7 @@ function createStatusHistoryEntry(status, detail, at = new Date().toISOString())
     status: String(status || "").trim(),
     detail: normalizeLine(detail || "", 160),
     at: String(at || "").trim() || new Date().toISOString(),
+    actor: "system",
   };
 }
 
@@ -492,11 +497,21 @@ function normalizeStatusHistory(entries, fallbackStatus, fallbackDetail, fallbac
           status: String((entry && entry.status) || "").trim(),
           detail: normalizeLine((entry && entry.detail) || "", 160),
           at: String((entry && entry.at) || "").trim(),
+          actor: String((entry && entry.actor) || "system").trim() || "system",
         }))
         .filter((entry) => entry.status && entry.at)
     : [];
   if (normalized.length) return normalized;
   return [createStatusHistoryEntry(fallbackStatus, fallbackDetail, fallbackAt)];
+}
+
+function createTrailEntry(status, detail, at = new Date().toISOString(), actor = "system") {
+  return {
+    status: String(status || "").trim(),
+    detail: normalizeLine(detail || "", 160),
+    at: String(at || "").trim() || new Date().toISOString(),
+    actor: String(actor || "system").trim() || "system",
+  };
 }
 
 function formatStatusLabel(status) {
@@ -886,11 +901,17 @@ function renderStatusTrail(entries, emptyMessage) {
           const tone = ["open", "in-progress", "resolved"].includes(entry.status)
             ? getMaintenanceStatusTone(entry.status)
             : getPaymentStatusTone(entry.status);
+          const actorLabel = entry.actor === "management"
+            ? "Management"
+            : entry.actor === "tenant"
+            ? "Tenant"
+            : "System";
           return `<div class="status-timeline-item">
             <div class="status-timeline-marker ${escapeHtml(tone)}"></div>
             <div class="status-timeline-content">
               <div class="status-timeline-head">
                 <strong>${escapeHtml(formatStatusLabel(entry.status))}</strong>
+                <span class="status-timeline-actor">${escapeHtml(actorLabel)}</span>
                 <span>${escapeHtml(formatDateTime(entry.at))}</span>
               </div>
               <p>${escapeHtml(entry.detail || "")}</p>
@@ -1628,7 +1649,7 @@ function tenantPaymentsPage(user, db, flash = "") {
           <form method="post" action="/tenant/payments" style="padding:1rem 1.25rem; display:grid; gap:0.85rem;">
             <div class="form-group"><label class="form-label">Bill</label><select name="bill_id" class="form-input" ${bills.length ? "" : "disabled"}>${options}</select></div>
             <div class="form-group"><label class="form-label">Amount</label><input name="amount" type="number" min="0" step="100" class="form-input" placeholder="e.g. 250000" required /></div>
-            <div class="form-group"><label class="form-label">Note</label><input name="note" type="text" maxlength="120" class="form-input" placeholder="Transfer reference or note" /></div>
+            <div class="form-group"><label class="form-label">Proof / Reference Note</label><input name="note" type="text" maxlength="120" class="form-input" placeholder="Transfer reference, bank note, or proof detail" /></div>
             <button type="submit" class="btn btn-primary" ${bills.length ? "" : "disabled"}>Submit Payment</button>
           </form>
         </div>
@@ -1648,6 +1669,7 @@ function tenantPaymentsPage(user, db, flash = "") {
           <div style="display:grid; gap:0.5rem; margin-bottom:1rem; color:var(--text-secondary);">
             <div><strong style="color:var(--text-primary);">Latest amount:</strong> ${formatCurrency(latestPayment.amount)}</div>
             <div><strong style="color:var(--text-primary);">Submitted:</strong> ${formatDateTime(latestPayment.createdAt)}</div>
+            <div><strong style="color:var(--text-primary);">Proof note:</strong> ${escapeHtml(latestPayment.note || "No note added")}</div>
             <div><strong style="color:var(--text-primary);">Reviewed:</strong> ${latestPayment.reviewedAt ? formatDateTime(latestPayment.reviewedAt) : "Waiting for review"}</div>
           </div>
         ` : ""}
@@ -1719,6 +1741,7 @@ function tenantMaintenancePage(user, db, flash = "") {
           <form method="post" action="/tenant/requests" style="padding:1rem 1.25rem; display:grid; gap:0.85rem;">
             <div class="form-group"><label class="form-label">Title</label><input name="title" type="text" maxlength="80" class="form-input" placeholder="e.g. Water leak in bathroom" required /></div>
             <div class="form-group"><label class="form-label">Description</label><textarea name="description" class="form-input" rows="4" maxlength="400" placeholder="Describe the issue" required></textarea></div>
+            <div class="form-group"><label class="form-label">Evidence / Context Note</label><input name="evidence_note" type="text" maxlength="160" class="form-input" placeholder="Add photos, location detail, or supporting context" /></div>
             <button type="submit" class="btn btn-primary">Send Request</button>
           </form>
         </div>
@@ -1755,6 +1778,7 @@ function tenantMaintenancePage(user, db, flash = "") {
               <div><strong style="color:var(--text-primary);">Latest issue:</strong> ${escapeHtml(latestRequest.title)}</div>
               <div><strong style="color:var(--text-primary);">Opened:</strong> ${formatDateTime(latestRequest.createdAt)}</div>
               <div><strong style="color:var(--text-primary);">Last updated:</strong> ${formatDateTime(latestRequest.updatedAt || latestRequest.createdAt)}</div>
+              <div><strong style="color:var(--text-primary);">Context note:</strong> ${escapeHtml(latestRequest.evidenceNote || "No context note added")}</div>
               <div><strong style="color:var(--text-primary);">SLA:</strong> ${escapeHtml(latestRequestSla.label)} - ${escapeHtml(latestRequestSla.detail)}</div>
             </div>
           ` : ""}
@@ -3013,6 +3037,7 @@ function adminPaymentsPage(user, db, flash = "", filters = {}) {
             <td style="padding:0.9rem 0.75rem;">
               <form method="post" action="/admin/payments/status" style="display:flex; gap:0.5rem; flex-wrap:wrap;">
                 <input type="hidden" name="payment_id" value="${escapeHtml(payment.id)}" />
+                <input type="text" name="response_note" class="form-input" placeholder="Optional review note" maxlength="160" style="min-width: 220px;" />
                 <button class="btn btn-primary" type="submit" name="status" value="approved" ${isPending ? "" : "disabled"}>Approve</button>
                 <button class="btn btn-secondary" type="submit" name="status" value="rejected" ${isPending ? "" : "disabled"}>Reject</button>
               </form>
@@ -3113,6 +3138,7 @@ function adminMaintenancePage(user, db, flash = "", filters = {}) {
             <td style="padding:0.9rem 0.75rem;">
               <form method="post" action="/admin/maintenance/status" style="display:flex; gap:0.5rem; flex-wrap:wrap;">
                 <input type="hidden" name="request_id" value="${escapeHtml(request.id)}" />
+                <input type="text" name="response_note" class="form-input" placeholder="Optional response note" maxlength="160" style="min-width: 220px;" />
                 <button class="btn btn-primary" type="submit" name="status" value="in-progress" ${isResolved ? "disabled" : ""}>In Progress</button>
                 <button class="btn btn-secondary" type="submit" name="status" value="resolved" ${isResolved ? "disabled" : ""}>Resolve</button>
               </form>
@@ -3431,11 +3457,12 @@ const server = http.createServer(async (req, res) => {
       const form = parseForm(body);
       const title = normalizeLine(form.title, 80);
       const description = normalizeLine(form.description, 400);
+      const evidenceNote = normalizeLine(form.evidence_note, 160);
       if (!title || !description) {
         return redirectWithMessage(res, "/tenant/requests", "Please add a title and description for the maintenance request.");
       }
       const db = loadDb();
-      db.maintenanceRequests.push(createMaintenanceRequest({ tenantId: user.id, title, description }));
+      db.maintenanceRequests.push(createMaintenanceRequest({ tenantId: user.id, title, description, evidenceNote }));
       saveDb(db);
       notifyRealtimeChange();
       return redirectWithMessage(res, "/tenant/requests", "Maintenance request sent.");
@@ -3687,13 +3714,14 @@ const server = http.createServer(async (req, res) => {
         return redirectWithMessage(res, "/admin/payments", "Only pending payments can be reviewed.");
       }
       const nextStatus = String(form.status || "").trim();
+      const responseNote = normalizeLine(form.response_note, 160);
       if (!["approved", "rejected"].includes(nextStatus)) {
         return redirectWithMessage(res, "/admin/payments", "Choose a valid payment status.");
       }
       payment.status = nextStatus;
       payment.reviewedAt = new Date().toISOString();
       payment.statusHistory = Array.isArray(payment.statusHistory) ? payment.statusHistory : [];
-      payment.statusHistory.push(createStatusHistoryEntry(nextStatus, `Payment ${nextStatus}.`, payment.reviewedAt));
+      payment.statusHistory.push(createTrailEntry(nextStatus, responseNote ? `Payment ${nextStatus}. ${responseNote}` : `Payment ${nextStatus}.`, payment.reviewedAt, "management"));
       syncBillStatuses(db);
       saveDb(db);
       notifyRealtimeChange();
@@ -3724,6 +3752,7 @@ const server = http.createServer(async (req, res) => {
       const request = db.maintenanceRequests.find((item) => item.id === normalizeLine(form.request_id, 40));
       if (!request) return redirectWithMessage(res, "/admin/maintenance", "Request not found.");
       const nextStatus = String(form.status || "").trim();
+      const responseNote = normalizeLine(form.response_note, 160);
       if (!["open", "in-progress", "resolved"].includes(nextStatus)) {
         return redirectWithMessage(res, "/admin/maintenance", "Choose a valid maintenance status.");
       }
@@ -3737,7 +3766,7 @@ const server = http.createServer(async (req, res) => {
         request.resolvedAt = now;
       }
       request.statusHistory = Array.isArray(request.statusHistory) ? request.statusHistory : [];
-      request.statusHistory.push(createStatusHistoryEntry(nextStatus, `Maintenance request marked ${nextStatus}.`, now));
+      request.statusHistory.push(createTrailEntry(nextStatus, responseNote ? `Maintenance request marked ${nextStatus}. ${responseNote}` : `Maintenance request marked ${nextStatus}.`, now, "management"));
       saveDb(db);
       notifyRealtimeChange();
       return redirectWithMessage(res, "/admin/maintenance", "Maintenance status updated.");
