@@ -41,11 +41,14 @@ try {
   if (!renderConfig.includes("healthCheckPath: /healthz")) {
     fail("Render health check path must be '/healthz'.");
   }
-  if (!renderConfig.includes("value: /tmp/godstime-lodge-data")) {
-    fail("Render DATA_DIR must point to ephemeral free-plan storage.");
+  if (!renderConfig.includes("DATABASE_URL")) {
+    fail("Render must provide DATABASE_URL from the free Postgres database.");
   }
-  if (renderConfig.includes("mountPath: /var/data") || renderConfig.includes("disk:")) {
-    fail("Free plan blueprint must not define a persistent disk.");
+  if (!renderConfig.includes("fromDatabase:")) {
+    fail("Render DATABASE_URL must come from a database reference.");
+  }
+  if (!renderConfig.includes("plan: free")) {
+    fail("Free blueprint must stay on the free plan.");
   }
 } catch (error) {
   fail(`Render config validation failed: ${error.message}`);

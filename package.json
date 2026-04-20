@@ -8,6 +8,9 @@
     "start": "node node-server.js",
     "test": "node scripts/check-app.js"
   },
+  "dependencies": {
+    "pg": "^8.13.1"
+  },
   "engines": {
     "node": ">=18"
   }

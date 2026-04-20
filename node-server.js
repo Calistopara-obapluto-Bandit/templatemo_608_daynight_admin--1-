@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { URL } = require("url");
+const { Pool } = require("pg");
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || "0.0.0.0";
@@ -10,6 +11,7 @@ const DATA_DIR = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
   : path.join(__dirname, "data");
 const UPLOADS_DIR = path.join(DATA_DIR, "uploads");
+const DATABASE_URL = String(process.env.DATABASE_URL || "").trim();
 const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || "admin@godstimelodge.com").trim().toLowerCase();
 const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || "admin123");
 const IS_DEFAULT_ADMIN_PASSWORD = ADMIN_PASSWORD === "admin123";
@@ -23,6 +25,9 @@ const ASSETS_DIR = path.join(PUBLIC_DIR, "assets");
 const PAYMENT_SYMBOL_MARKUP = '<text x="12" y="16" text-anchor="middle" font-size="15" font-weight="700" fill="currentColor">₦</text>';
 let notificationVersion = 0;
 const notificationClients = new Set();
+let dbPool = null;
+let dbCache = null;
+let dbReadyPromise = null;
 
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -174,6 +179,26 @@ function defaultSettings() {
   };
 }
 
+function createDefaultDb() {
+  const admin = createUser({
+    email: ADMIN_EMAIL,
+    password: ADMIN_PASSWORD,
+    role: "admin",
+    fullName: "Admin",
+    unit: "",
+  });
+  return {
+    users: [admin],
+    tenantInvites: [],
+    sessions: [],
+    bills: [],
+    payments: [],
+    maintenanceRequests: [],
+    projects: [],
+    settings: defaultSettings(),
+  };
+}
+
 function normalizeDb(db) {
   const settings = db && typeof db.settings === "object" && db.settings ? db.settings : {};
   return {
@@ -254,25 +279,82 @@ function normalizeDb(db) {
   };
 }
 
-function loadDb() {
-  ensureDataDir();
-  if (!fs.existsSync(DB_PATH)) {
-    const admin = createUser({
-      email: ADMIN_EMAIL,
-      password: ADMIN_PASSWORD,
-      role: "admin",
-      fullName: "Admin",
-      unit: "",
-    });
-    const db = { users: [admin], tenantInvites: [], sessions: [], bills: [], payments: [], maintenanceRequests: [], projects: [], settings: defaultSettings() };
-    fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), "utf8");
-  }
-  return syncBillStatuses(normalizeDb(JSON.parse(fs.readFileSync(DB_PATH, "utf8"))));
-}
-
-function saveDb(db) {
+function persistDbToFile(db) {
   ensureDataDir();
   fs.writeFileSync(DB_PATH, JSON.stringify(normalizeDb(db), null, 2), "utf8");
+}
+
+async function ensureDatabaseReady() {
+  if (!DATABASE_URL) {
+    ensureDataDir();
+    if (!fs.existsSync(DB_PATH)) {
+      dbCache = createDefaultDb();
+      persistDbToFile(dbCache);
+    } else {
+      dbCache = normalizeDb(JSON.parse(fs.readFileSync(DB_PATH, "utf8")));
+      dbCache = syncBillStatuses(dbCache);
+      persistDbToFile(dbCache);
+    }
+    return dbCache;
+  }
+
+  if (!dbPool) {
+    dbPool = new Pool({
+      connectionString: DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+    });
+  }
+  await dbPool.query(`
+    CREATE TABLE IF NOT EXISTS app_state (
+      state_key TEXT PRIMARY KEY,
+      data JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  const result = await dbPool.query("SELECT data FROM app_state WHERE state_key = $1", ["main"]);
+  if (result.rowCount) {
+    dbCache = normalizeDb(result.rows[0].data);
+    dbCache = syncBillStatuses(dbCache);
+  } else {
+    dbCache = createDefaultDb();
+    await dbPool.query(
+      `INSERT INTO app_state (state_key, data, updated_at)
+       VALUES ($1, $2::jsonb, NOW())`,
+      ["main", JSON.stringify(dbCache)]
+    );
+  }
+  return dbCache;
+}
+
+function loadDb() {
+  if (!dbCache) {
+    throw new Error("Database not ready yet.");
+  }
+  dbCache = syncBillStatuses(dbCache);
+  return dbCache;
+}
+
+async function saveDb(db) {
+  const normalized = syncBillStatuses(normalizeDb(db));
+  dbCache = normalized;
+  if (!DATABASE_URL) {
+    persistDbToFile(normalized);
+    return normalized;
+  }
+  if (!dbPool) {
+    dbPool = new Pool({
+      connectionString: DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+    });
+  }
+  await dbPool.query(
+    `INSERT INTO app_state (state_key, data, updated_at)
+     VALUES ($1, $2::jsonb, NOW())
+     ON CONFLICT (state_key)
+     DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()`,
+    ["main", JSON.stringify(normalized)]
+  );
+  return normalized;
 }
 
 function parseCookies(req) {
@@ -297,7 +379,7 @@ function getCurrentUser(req) {
   const activeSessions = db.sessions.filter((session) => Date.parse(session.expiresAt) > now);
   if (activeSessions.length !== db.sessions.length) {
     db.sessions = activeSessions;
-    saveDb(db);
+    void saveDb(db);
   }
   const session = activeSessions.find((item) => item.id === sid);
   if (!session) return null;
@@ -317,23 +399,23 @@ function buildSessionCookie(sid, maxAge = null) {
   return parts.join("; ");
 }
 
-function persistSession(userId) {
+async function persistSession(userId) {
   const db = loadDb();
   const session = createSession(userId);
   const now = Date.now();
   db.sessions = db.sessions.filter((item) => item.userId !== userId && Date.parse(item.expiresAt) > now);
   db.sessions.push(session);
-  saveDb(db);
+  await saveDb(db);
   return session;
 }
 
-function destroySession(sessionId) {
+async function destroySession(sessionId) {
   if (!sessionId) return;
   const db = loadDb();
   const nextSessions = db.sessions.filter((session) => session.id !== sessionId);
   if (nextSessions.length !== db.sessions.length) {
     db.sessions = nextSessions;
-    saveDb(db);
+    await saveDb(db);
   }
 }
 
@@ -3717,8 +3799,11 @@ function serveUpload(res, pathname) {
   return true;
 }
 
+dbReadyPromise = ensureDatabaseReady();
+
 const server = http.createServer(async (req, res) => {
   try {
+    await dbReadyPromise;
     const url = new URL(req.url, `http://${req.headers.host}`);
     const pathname = url.pathname;
     const method = (req.method || "GET").toUpperCase();
@@ -3764,7 +3849,7 @@ const server = http.createServer(async (req, res) => {
       const hash = pbkdf2Hash(password, user.saltHex);
       if (hash !== user.passwordHash) return send(res, 401, loginView("Invalid email or password."));
 
-      const session = persistSession(user.id);
+      const session = await persistSession(user.id);
       res.setHeader("Set-Cookie", buildSessionCookie(session.id, Math.floor(SESSION_TTL_MS / 1000)));
       return redirect(res, "/");
     }
@@ -3792,10 +3877,10 @@ const server = http.createServer(async (req, res) => {
       const tenant = createUser({ email, password, role: "tenant", fullName: invite.fullName || fullName, unit: invite.unit });
       db.users.push(tenant);
       invite.usedAt = new Date().toISOString();
-      saveDb(db);
+      await saveDb(db);
       notifyRealtimeChange();
 
-      const session = persistSession(tenant.id);
+      const session = await persistSession(tenant.id);
       res.setHeader("Set-Cookie", buildSessionCookie(session.id, Math.floor(SESSION_TTL_MS / 1000)));
       return redirect(res, "/tenant/dashboard");
     }
@@ -3863,7 +3948,7 @@ const server = http.createServer(async (req, res) => {
       if (method !== "GET" && method !== "POST") return sendText(res, 405, "Method Not Allowed", { Allow: "GET, POST" });
       const cookies = parseCookies(req);
       const sid = cookies.gtl_session;
-      destroySession(sid);
+      await destroySession(sid);
       res.setHeader("Set-Cookie", buildSessionCookie("", 0));
       return redirect(res, "/login");
     }
@@ -3916,7 +4001,7 @@ const server = http.createServer(async (req, res) => {
       payment.proofFiles = Array.isArray(files.proof_files) ? files.proof_files.map((file) => storeUploadedFile(file, "payment")) : [];
       db.payments.push(payment);
       syncBillStatuses(db);
-      saveDb(db);
+      await saveDb(db);
       notifyRealtimeChange();
       return redirectWithMessage(res, "/tenant/payments", "Payment submitted successfully.");
     }
@@ -3936,7 +4021,7 @@ const server = http.createServer(async (req, res) => {
       if (!payment) return redirectWithMessage(res, "/tenant/payments", "Payment not found.");
       payment.discussion = Array.isArray(payment.discussion) ? payment.discussion : [];
       payment.discussion.push(createThreadEntry("tenant", comment, new Date().toISOString(), user.fullName || "Tenant"));
-      saveDb(db);
+      await saveDb(db);
       notifyRealtimeChange();
       return redirectWithMessage(res, "/tenant/payments", "Payment note added.");
     }
@@ -3964,7 +4049,7 @@ const server = http.createServer(async (req, res) => {
       const request = createMaintenanceRequest({ tenantId: user.id, title, description, evidenceNote, evidenceLinks });
       request.evidenceFiles = Array.isArray(files.evidence_files) ? files.evidence_files.map((file) => storeUploadedFile(file, "maintenance")) : [];
       db.maintenanceRequests.push(request);
-      saveDb(db);
+      await saveDb(db);
       notifyRealtimeChange();
       return redirectWithMessage(res, "/tenant/requests", "Maintenance request sent.");
     }
@@ -3984,7 +4069,7 @@ const server = http.createServer(async (req, res) => {
       if (!request) return redirectWithMessage(res, "/tenant/requests", "Maintenance request not found.");
       request.discussion = Array.isArray(request.discussion) ? request.discussion : [];
       request.discussion.push(createThreadEntry("tenant", comment, new Date().toISOString(), user.fullName || "Tenant"));
-      saveDb(db);
+      await saveDb(db);
       notifyRealtimeChange();
       return redirectWithMessage(res, "/tenant/requests", "Maintenance note added.");
     }
@@ -4061,7 +4146,7 @@ const server = http.createServer(async (req, res) => {
         tenant.saltHex = replacement.saltHex;
         tenant.passwordHash = replacement.passwordHash;
       }
-      saveDb(db);
+      await saveDb(db);
       notifyRealtimeChange();
       return redirectWithMessage(res, "/admin/tenants", "Tenant record updated successfully.");
     }
@@ -4102,7 +4187,7 @@ const server = http.createServer(async (req, res) => {
         ...db.users.map((item) => item.email),
         ...db.tenantInvites.map((item) => item.email),
       ] }));
-      saveDb(db);
+      await saveDb(db);
       notifyRealtimeChange();
       return redirectWithMessage(res, "/admin/tenants", `Tenant invite created. Share code ${inviteCode} with ${fullName}. Their email is ${email}.`);
     }
@@ -4133,7 +4218,7 @@ const server = http.createServer(async (req, res) => {
         return redirectWithMessage(res, "/admin/projects", "Choose a valid project deadline.");
       }
       db.projects.push(createProject({ title, description, owner, budget, dueDate }));
-      saveDb(db);
+      await saveDb(db);
       return redirectWithMessage(res, "/admin/projects", "Project created successfully.");
     }
 
@@ -4152,7 +4237,7 @@ const server = http.createServer(async (req, res) => {
         return redirectWithMessage(res, "/admin/projects", "Choose a valid project status.");
       }
       project.status = nextStatus;
-      saveDb(db);
+      await saveDb(db);
       return redirectWithMessage(res, "/admin/projects", "Project status updated.");
     }
 
@@ -4179,7 +4264,7 @@ const server = http.createServer(async (req, res) => {
         db.settings.announcementUpdatedAt = new Date().toISOString();
       }
       db.settings.announcement = announcement;
-      saveDb(db);
+      await saveDb(db);
       notifyRealtimeChange();
       return redirectWithMessage(res, "/admin/settings", "Settings updated successfully.");
     }
@@ -4210,7 +4295,7 @@ const server = http.createServer(async (req, res) => {
       }
       db.bills.push(createBill({ tenantId, title, amount, dueDate }));
       syncBillStatuses(db);
-      saveDb(db);
+      await saveDb(db);
       notifyRealtimeChange();
       return redirectWithMessage(res, "/admin/bills", "Bill created successfully.");
     }
@@ -4253,7 +4338,7 @@ const server = http.createServer(async (req, res) => {
       payment.discussion = Array.isArray(payment.discussion) ? payment.discussion : [];
       payment.discussion.push(createThreadEntry("management", responseNote ? `Management ${nextStatus}: ${responseNote}` : `Management ${nextStatus} the payment.`, payment.reviewedAt, user.fullName || "Management"));
       syncBillStatuses(db);
-      saveDb(db);
+      await saveDb(db);
       notifyRealtimeChange();
       return redirectWithMessage(res, "/admin/payments", "Payment status updated.");
     }
@@ -4299,7 +4384,7 @@ const server = http.createServer(async (req, res) => {
       request.statusHistory.push(createTrailEntry(nextStatus, responseNote ? `Maintenance request marked ${nextStatus}. ${responseNote}` : `Maintenance request marked ${nextStatus}.`, now, "management"));
       request.discussion = Array.isArray(request.discussion) ? request.discussion : [];
       request.discussion.push(createThreadEntry("management", responseNote ? `Management ${nextStatus}: ${responseNote}` : `Management marked the request ${nextStatus}.`, now, user.fullName || "Management"));
-      saveDb(db);
+      await saveDb(db);
       notifyRealtimeChange();
       return redirectWithMessage(res, "/admin/maintenance", "Maintenance status updated.");
     }
