@@ -9,11 +9,13 @@ const HOST = process.env.HOST || "0.0.0.0";
 const DATA_DIR = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
   : path.join(__dirname, "data");
+const UPLOADS_DIR = path.join(DATA_DIR, "uploads");
 const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || "admin@godstimelodge.com").trim().toLowerCase();
 const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || "admin123");
 const IS_DEFAULT_ADMIN_PASSWORD = ADMIN_PASSWORD === "admin123";
 const COOKIE_SECURE = String(process.env.COOKIE_SECURE || "").toLowerCase() === "true";
 const MAX_BODY_SIZE = 1024 * 1024;
+const MAX_UPLOAD_BODY_SIZE = 8 * 1024 * 1024;
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const DB_PATH = path.join(DATA_DIR, "node-db.json");
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -24,6 +26,11 @@ const notificationClients = new Set();
 
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+function ensureUploadsDir() {
+  ensureDataDir();
+  if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
 
 function randomId(len = 24) {
@@ -95,6 +102,7 @@ function createPayment({ tenantId, billId, amount, note, proofLinks = [] }) {
     amount: Number(amount) || 0,
     note: String(note || "").trim(),
     proofLinks: normalizeSupportLinks(proofLinks, 4),
+    proofFiles: [],
     discussion: note ? [createThreadEntry("tenant", `Payment note: ${note}`, createdAt, "Tenant")] : [],
     status: "pending",
     createdAt,
@@ -120,6 +128,7 @@ function createMaintenanceRequest({ tenantId, title, description, evidenceNote =
     description: String(description || "").trim(),
     evidenceNote: normalizeLine(evidenceNote || "", 160),
     evidenceLinks: normalizeSupportLinks(evidenceLinks, 4),
+    evidenceFiles: [],
     discussion: [
       createThreadEntry("tenant", `Request: ${description || title || "Maintenance issue"}`, createdAt, "Tenant"),
       ...(evidenceNote ? [createThreadEntry("tenant", `Evidence note: ${evidenceNote}`, createdAt, "Tenant")] : []),
@@ -188,6 +197,7 @@ function normalizeDb(db) {
           ...payment,
           note: normalizeLine(payment.note || "", 120),
           proofLinks: normalizeSupportLinks(payment.proofLinks || payment.attachments || payment.proofLinksText || payment.evidenceLinks, 4),
+          proofFiles: normalizeAttachmentRecords(payment.proofFiles || payment.uploads || payment.files || []),
           discussion: normalizeThreadEntries(payment.discussion, payment.note ? [
             createThreadEntry("tenant", `Payment note: ${payment.note}`, payment.createdAt || new Date().toISOString(), "Tenant"),
           ] : []),
@@ -209,6 +219,7 @@ function normalizeDb(db) {
           description: normalizeLine(request.description || "", 400),
           evidenceNote: normalizeLine(request.evidenceNote || "", 160),
           evidenceLinks: normalizeSupportLinks(request.evidenceLinks || request.attachments || request.evidenceLinksText, 4),
+          evidenceFiles: normalizeAttachmentRecords(request.evidenceFiles || request.uploads || request.files || []),
           discussion: normalizeThreadEntries(request.discussion, [
             createThreadEntry("tenant", `Request: ${request.description || request.title || "Maintenance issue"}`, request.createdAt || new Date().toISOString(), "Tenant"),
             ...(request.evidenceNote ? [createThreadEntry("tenant", `Evidence note: ${request.evidenceNote}`, request.createdAt || new Date().toISOString(), "Tenant")] : []),
@@ -372,6 +383,24 @@ function readBody(req) {
   });
 }
 
+function readBodyBuffer(req, maxBytes = MAX_UPLOAD_BODY_SIZE) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let total = 0;
+    req.on("data", (chunk) => {
+      total += chunk.length;
+      if (total > maxBytes) {
+        reject(new Error("Body too large"));
+        req.destroy();
+        return;
+      }
+      chunks.push(Buffer.from(chunk));
+    });
+    req.on("error", reject);
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+  });
+}
+
 function parseForm(body) {
   const out = {};
   body.split("&").forEach((pair) => {
@@ -382,6 +411,68 @@ function parseForm(body) {
     out[key] = val;
   });
   return out;
+}
+
+function isMultipartRequest(req) {
+  const contentType = String(req.headers["content-type"] || "").toLowerCase();
+  return contentType.includes("multipart/form-data");
+}
+
+function parseMultipartFormData(buffer, contentType) {
+  const boundaryMatch = /boundary=([^;]+)/i.exec(String(contentType || ""));
+  if (!boundaryMatch) {
+    return { fields: {}, files: {} };
+  }
+  const boundary = boundaryMatch[1].replace(/^"|"$/g, "");
+  const boundaryText = `--${boundary}`;
+  const bodyText = buffer.toString("latin1");
+  const parts = bodyText.split(boundaryText);
+  const fields = {};
+  const files = {};
+
+  parts.slice(1, -1).forEach((part) => {
+    let chunk = part;
+    if (chunk.startsWith("\r\n")) chunk = chunk.slice(2);
+    if (chunk.endsWith("\r\n")) chunk = chunk.slice(0, -2);
+    if (chunk === "--") return;
+    const headerEnd = chunk.indexOf("\r\n\r\n");
+    if (headerEnd === -1) return;
+    const headerText = chunk.slice(0, headerEnd);
+    const valueText = chunk.slice(headerEnd + 4);
+    const headers = headerText.split("\r\n");
+    const disposition = headers.find((line) => /^content-disposition:/i.test(line));
+    if (!disposition) return;
+    const nameMatch = /name="([^"]+)"/i.exec(disposition);
+    if (!nameMatch) return;
+    const fieldName = nameMatch[1];
+    const filenameMatch = /filename="([^"]*)"/i.exec(disposition);
+    if (filenameMatch && filenameMatch[1]) {
+      const fileHeader = headers.find((line) => /^content-type:/i.test(line)) || "";
+      const mimeType = normalizeLine(fileHeader.split(":").slice(1).join(":") || "application/octet-stream", 80) || "application/octet-stream";
+      const bufferValue = Buffer.from(valueText.replace(/\r\n$/, ""), "latin1");
+      if (!files[fieldName]) files[fieldName] = [];
+      files[fieldName].push({
+        filename: filenameMatch[1],
+        mimeType,
+        size: bufferValue.length,
+        buffer: bufferValue,
+      });
+    } else {
+      fields[fieldName] = Buffer.from(valueText.replace(/\r\n$/, ""), "latin1").toString("utf8");
+    }
+  });
+
+  return { fields, files };
+}
+
+async function readSubmittedForm(req) {
+  if (isMultipartRequest(req)) {
+    const buffer = await readBodyBuffer(req);
+    const contentType = String(req.headers["content-type"] || "");
+    return parseMultipartFormData(buffer, contentType);
+  }
+  const body = await readBody(req);
+  return { fields: parseForm(body), files: {} };
 }
 
 function escapeHtml(s) {
@@ -540,6 +631,58 @@ function normalizeSupportLinks(value, maxItems = 4) {
     .map((item) => normalizeLine(item, 180))
     .filter(Boolean)
     .slice(0, maxItems);
+}
+
+function normalizeAttachmentRecords(value, maxItems = 4) {
+  const raw = Array.isArray(value) ? value : [];
+  return raw
+    .map((item) => {
+      if (!item) return null;
+      if (typeof item === "string") {
+        const url = normalizeLine(item, 240);
+        return url ? { name: url, url } : null;
+      }
+      const url = normalizeLine(item.url || item.path || item.href || "", 240);
+      const storedName = normalizeLine(item.storedName || item.filename || item.fileName || "", 120);
+      const name = normalizeLine(item.name || item.originalName || item.label || storedName || url, 120);
+      if (!url && !storedName) return null;
+      return {
+        name: name || "Attachment",
+        url,
+        storedName,
+        mimeType: normalizeLine(item.mimeType || item.type || "", 80),
+        size: Math.max(0, Number(item.size) || 0),
+        uploadedAt: String(item.uploadedAt || item.createdAt || "").trim(),
+      };
+    })
+    .filter(Boolean)
+    .slice(0, maxItems);
+}
+
+function attachmentFileUrl(record) {
+  if (!record) return "";
+  if (record.url) return record.url;
+  if (record.storedName) return `/uploads/${encodeURIComponent(record.storedName)}`;
+  return "";
+}
+
+function storeUploadedFile(file, prefix) {
+  ensureUploadsDir();
+  const originalName = normalizeLine(file && file.filename ? file.filename : "upload", 120) || "upload";
+  const ext = path.extname(originalName).toLowerCase().slice(0, 12);
+  const safeExt = /^[.][a-z0-9]+$/.test(ext) ? ext : "";
+  const storedName = `${prefix}-${randomId(10)}${safeExt}`;
+  const filePath = path.join(UPLOADS_DIR, storedName);
+  fs.writeFileSync(filePath, Buffer.isBuffer(file.buffer) ? file.buffer : Buffer.from(file.buffer || ""));
+  return {
+    id: randomId(8),
+    name: originalName,
+    storedName,
+    url: `/uploads/${encodeURIComponent(storedName)}`,
+    mimeType: normalizeLine(file.mimeType || "application/octet-stream", 80) || "application/octet-stream",
+    size: Math.max(0, Number(file.size) || (Buffer.isBuffer(file.buffer) ? file.buffer.length : 0)),
+    uploadedAt: new Date().toISOString(),
+  };
 }
 
 function createThreadEntry(authorRole, body, at = new Date().toISOString(), authorName = "") {
@@ -1017,7 +1160,12 @@ function renderStatusTrail(entries, emptyMessage) {
 
 function renderSupportLinks(links, emptyMessage = "No supporting documents attached.") {
   const items = Array.isArray(links) && links.length
-    ? `<ul class="support-link-list">${links.map((link) => `<li><span class="support-link-dot"></span><a href="${escapeHtml(link)}" target="_blank" rel="noreferrer">${escapeHtml(link)}</a></li>`).join("")}</ul>`
+    ? `<ul class="support-link-list">${links.map((link) => {
+        const url = typeof link === "string" ? link : attachmentFileUrl(link);
+        const label = typeof link === "string" ? link : (link.name || link.storedName || link.url || "Attachment");
+        if (!url) return "";
+        return `<li><span class="support-link-dot"></span><a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">${escapeHtml(label)}</a></li>`;
+      }).join("")}</ul>`
     : `<div style="padding:0.85rem 0; color:var(--text-secondary);">${escapeHtml(emptyMessage)}</div>`;
   return items;
 }
@@ -1774,11 +1922,12 @@ function tenantPaymentsPage(user, db, flash = "") {
       <div class="two-col">
         <div class="card">
           <div class="card-header"><div><h3 class="card-title">Submit Payment</h3><p class="card-subtitle">Attach a payment to one of your bills</p></div></div>
-          <form method="post" action="/tenant/payments" style="padding:1rem 1.25rem; display:grid; gap:0.85rem;">
+          <form method="post" action="/tenant/payments" enctype="multipart/form-data" style="padding:1rem 1.25rem; display:grid; gap:0.85rem;">
             <div class="form-group"><label class="form-label">Bill</label><select name="bill_id" class="form-input" ${bills.length ? "" : "disabled"}>${options}</select></div>
             <div class="form-group"><label class="form-label">Amount</label><input name="amount" type="number" min="0" step="100" class="form-input" placeholder="e.g. 250000" required /></div>
             <div class="form-group"><label class="form-label">Proof / Reference Note</label><input name="note" type="text" maxlength="120" class="form-input" placeholder="Transfer reference, bank note, or proof detail" /></div>
             <div class="form-group"><label class="form-label">Supporting Document Links</label><input name="proof_links" type="text" maxlength="240" class="form-input" placeholder="Paste receipt links or evidence URLs separated by commas" /></div>
+            <div class="form-group"><label class="form-label">Receipt Files</label><input name="proof_files" type="file" class="form-input" accept="image/*,application/pdf" multiple /></div>
             <button type="submit" class="btn btn-primary" ${bills.length ? "" : "disabled"}>Submit Payment</button>
           </form>
         </div>
@@ -1803,6 +1952,10 @@ function tenantPaymentsPage(user, db, flash = "") {
           </div>
         ` : ""}
         ${latestPaymentTrail}
+        <div style="margin-top:1rem;">
+          <div style="font-weight:600; margin-bottom:0.5rem;">Attached files</div>
+          ${renderSupportLinks(latestPayment ? latestPayment.proofFiles : [], "No files uploaded for this payment yet.")}
+        </div>
         </div>
       </div>
       <div class="two-col" style="margin-top:1.5rem;">
@@ -1900,11 +2053,12 @@ function tenantMaintenancePage(user, db, flash = "") {
       <div class="two-col">
         <div class="card">
           <div class="card-header"><div><h3 class="card-title">New Request</h3><p class="card-subtitle">Tell management what needs attention</p></div></div>
-          <form method="post" action="/tenant/requests" style="padding:1rem 1.25rem; display:grid; gap:0.85rem;">
+          <form method="post" action="/tenant/requests" enctype="multipart/form-data" style="padding:1rem 1.25rem; display:grid; gap:0.85rem;">
             <div class="form-group"><label class="form-label">Title</label><input name="title" type="text" maxlength="80" class="form-input" placeholder="e.g. Water leak in bathroom" required /></div>
             <div class="form-group"><label class="form-label">Description</label><textarea name="description" class="form-input" rows="4" maxlength="400" placeholder="Describe the issue" required></textarea></div>
             <div class="form-group"><label class="form-label">Evidence / Context Note</label><input name="evidence_note" type="text" maxlength="160" class="form-input" placeholder="Add photos, location detail, or supporting context" /></div>
             <div class="form-group"><label class="form-label">Evidence Links</label><input name="evidence_links" type="text" maxlength="240" class="form-input" placeholder="Paste image or document links separated by commas" /></div>
+            <div class="form-group"><label class="form-label">Evidence Files</label><input name="evidence_files" type="file" class="form-input" accept="image/*,application/pdf" multiple /></div>
             <button type="submit" class="btn btn-primary">Send Request</button>
           </form>
         </div>
@@ -1946,6 +2100,10 @@ function tenantMaintenancePage(user, db, flash = "") {
             </div>
           ` : ""}
           ${latestRequestTrail}
+          <div style="margin-top:1rem;">
+            <div style="font-weight:600; margin-bottom:0.5rem;">Attached files</div>
+            ${renderSupportLinks(latestRequest ? latestRequest.evidenceFiles : [], "No files uploaded for this request yet.")}
+          </div>
         </div>
       </div>
       <div class="two-col" style="margin-top:1.5rem;">
@@ -3531,6 +3689,34 @@ function serveStatic(res, pathname) {
   return true;
 }
 
+function serveUpload(res, pathname) {
+  if (!pathname.startsWith("/uploads/")) return false;
+  const rel = pathname.replace("/uploads/", "");
+  const filePath = path.join(UPLOADS_DIR, rel);
+  if (!filePath.startsWith(UPLOADS_DIR)) return false;
+  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) return false;
+
+  const ext = path.extname(filePath).toLowerCase();
+  const type =
+    ext === ".png"
+      ? "image/png"
+      : ext === ".jpg" || ext === ".jpeg"
+      ? "image/jpeg"
+      : ext === ".gif"
+      ? "image/gif"
+      : ext === ".webp"
+      ? "image/webp"
+      : ext === ".pdf"
+      ? "application/pdf"
+      : ext === ".txt"
+      ? "text/plain; charset=utf-8"
+      : "application/octet-stream";
+
+  res.writeHead(200, { "Content-Type": type, "Cache-Control": "public, max-age=86400" });
+  fs.createReadStream(filePath).pipe(res);
+  return true;
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
@@ -3540,6 +3726,7 @@ const server = http.createServer(async (req, res) => {
     applySecurityHeaders(res);
 
     if (serveStatic(res, pathname)) return;
+    if (serveUpload(res, pathname)) return;
 
     if (pathname === "/healthz") {
       try {
@@ -3710,9 +3897,10 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, tenantPaymentsPage(user, db, String(url.searchParams.get("message") || "")));
       }
       if (method !== "POST") return sendText(res, 405, "Method Not Allowed", { Allow: "POST" });
-      if (!isFormRequest(req)) return redirectWithMessage(res, "/tenant/payments", "Unsupported payment submission.");
-      const body = await readBody(req);
-      const form = parseForm(body);
+      if (!isFormRequest(req) && !isMultipartRequest(req)) return redirectWithMessage(res, "/tenant/payments", "Unsupported payment submission.");
+      const submission = await readSubmittedForm(req);
+      const form = submission.fields;
+      const files = submission.files || {};
       const amount = Number(form.amount || 0);
       const billId = normalizeLine(form.bill_id, 40);
       const note = normalizeLine(form.note, 120);
@@ -3724,7 +3912,9 @@ const server = http.createServer(async (req, res) => {
       if (getBillStatus(bill) === "paid") {
         return redirectWithMessage(res, "/tenant/payments", "That bill is already marked as paid.");
       }
-      db.payments.push(createPayment({ tenantId: user.id, billId, amount, note, proofLinks }));
+      const payment = createPayment({ tenantId: user.id, billId, amount, note, proofLinks });
+      payment.proofFiles = Array.isArray(files.proof_files) ? files.proof_files.map((file) => storeUploadedFile(file, "payment")) : [];
+      db.payments.push(payment);
       syncBillStatuses(db);
       saveDb(db);
       notifyRealtimeChange();
@@ -3759,9 +3949,10 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, tenantMaintenancePage(user, db, String(url.searchParams.get("message") || "")));
       }
       if (method !== "POST") return sendText(res, 405, "Method Not Allowed", { Allow: "POST" });
-      if (!isFormRequest(req)) return redirectWithMessage(res, "/tenant/requests", "Unsupported request submission.");
-      const body = await readBody(req);
-      const form = parseForm(body);
+      if (!isFormRequest(req) && !isMultipartRequest(req)) return redirectWithMessage(res, "/tenant/requests", "Unsupported request submission.");
+      const submission = await readSubmittedForm(req);
+      const form = submission.fields;
+      const files = submission.files || {};
       const title = normalizeLine(form.title, 80);
       const description = normalizeLine(form.description, 400);
       const evidenceNote = normalizeLine(form.evidence_note, 160);
@@ -3770,7 +3961,9 @@ const server = http.createServer(async (req, res) => {
         return redirectWithMessage(res, "/tenant/requests", "Please add a title and description for the maintenance request.");
       }
       const db = loadDb();
-      db.maintenanceRequests.push(createMaintenanceRequest({ tenantId: user.id, title, description, evidenceNote, evidenceLinks }));
+      const request = createMaintenanceRequest({ tenantId: user.id, title, description, evidenceNote, evidenceLinks });
+      request.evidenceFiles = Array.isArray(files.evidence_files) ? files.evidence_files.map((file) => storeUploadedFile(file, "maintenance")) : [];
+      db.maintenanceRequests.push(request);
       saveDb(db);
       notifyRealtimeChange();
       return redirectWithMessage(res, "/tenant/requests", "Maintenance request sent.");
