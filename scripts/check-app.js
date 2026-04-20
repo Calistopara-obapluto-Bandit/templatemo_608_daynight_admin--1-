@@ -42,13 +42,10 @@ try {
     fail("Render health check path must be '/healthz'.");
   }
   if (!renderConfig.includes("DATABASE_URL")) {
-    fail("Render must provide DATABASE_URL from the free Postgres database.");
+    fail("Render must expose DATABASE_URL for the existing database connection.");
   }
-  if (!renderConfig.includes("fromDatabase:")) {
-    fail("Render DATABASE_URL must come from a database reference.");
-  }
-  if (!renderConfig.includes("plan: free")) {
-    fail("Free blueprint must stay on the free plan.");
+  if (renderConfig.includes("databases:")) {
+    fail("Blueprint must not create a second free database in this workspace.");
   }
 } catch (error) {
   fail(`Render config validation failed: ${error.message}`);

@@ -1,7 +1,3 @@
-databases:
-  - name: godstime-lodge-db
-    plan: free
-    databaseName: godstime_lodge
 services:
   - type: web
     name: godstime-lodge
@@ -22,6 +18,4 @@ services:
       - key: COOKIE_SECURE
         value: "true"
       - key: DATABASE_URL
-        fromDatabase:
-          name: godstime-lodge-db
-          property: connectionString
+        sync: false
