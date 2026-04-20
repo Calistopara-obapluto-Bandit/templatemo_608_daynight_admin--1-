@@ -735,14 +735,16 @@ function normalizeAttachmentRecords(value, maxItems = 4) {
         const url = normalizeLine(item, 240);
         return url ? { name: url, url } : null;
       }
+      const dataUrl = String(item.dataUrl || "").trim();
       const url = normalizeLine(item.url || item.path || item.href || "", 240);
       const storedName = normalizeLine(item.storedName || item.filename || item.fileName || "", 120);
       const name = normalizeLine(item.name || item.originalName || item.label || storedName || url, 120);
-      if (!url && !storedName) return null;
+      if (!url && !storedName && !dataUrl) return null;
       return {
         name: name || "Attachment",
         url,
         storedName,
+        dataUrl,
         mimeType: normalizeLine(item.mimeType || item.type || "", 80),
         size: Math.max(0, Number(item.size) || 0),
         uploadedAt: String(item.uploadedAt || item.createdAt || "").trim(),
@@ -754,26 +756,26 @@ function normalizeAttachmentRecords(value, maxItems = 4) {
 
 function attachmentFileUrl(record) {
   if (!record) return "";
+  if (record.dataUrl) return record.dataUrl;
   if (record.url) return record.url;
   if (record.storedName) return `/uploads/${encodeURIComponent(record.storedName)}`;
   return "";
 }
 
 function storeUploadedFile(file, prefix) {
-  ensureUploadsDir();
   const originalName = normalizeLine(file && file.filename ? file.filename : "upload", 120) || "upload";
   const ext = path.extname(originalName).toLowerCase().slice(0, 12);
   const safeExt = /^[.][a-z0-9]+$/.test(ext) ? ext : "";
-  const storedName = `${prefix}-${randomId(10)}${safeExt}`;
-  const filePath = path.join(UPLOADS_DIR, storedName);
-  fs.writeFileSync(filePath, Buffer.isBuffer(file.buffer) ? file.buffer : Buffer.from(file.buffer || ""));
+  const buffer = Buffer.isBuffer(file.buffer) ? file.buffer : Buffer.from(file.buffer || "");
+  const mimeType = normalizeLine(file.mimeType || "application/octet-stream", 80) || "application/octet-stream";
   return {
     id: randomId(8),
     name: originalName,
-    storedName,
-    url: `/uploads/${encodeURIComponent(storedName)}`,
-    mimeType: normalizeLine(file.mimeType || "application/octet-stream", 80) || "application/octet-stream",
-    size: Math.max(0, Number(file.size) || (Buffer.isBuffer(file.buffer) ? file.buffer.length : 0)),
+    storedName: "",
+    url: "",
+    dataUrl: `data:${mimeType};base64,${buffer.toString("base64")}`,
+    mimeType,
+    size: Math.max(0, Number(file.size) || buffer.length),
     uploadedAt: new Date().toISOString(),
   };
 }
