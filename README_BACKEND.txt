@@ -48,20 +48,15 @@ Files added for deployment:
 Manual Render settings:
 
   Runtime: Node
-  Build Command: npm install
+  Plan: Free
+  Build Command: npm ci && npm test
   Start Command: npm start
   Health Check Path: /healthz
-  Plan: Starter or higher
-
-Persistent disk settings:
-
-  Mount Path: /var/data
-  Size: 1 GB
 
 Environment variable:
 
   NODE_ENV=production
-  DATA_DIR=/var/data
+  DATA_DIR=/tmp/godstime-lodge-data
   ADMIN_EMAIL=admin@godstimelodge.com
   ADMIN_PASSWORD=change-this-password
   COOKIE_SECURE=true
@@ -71,15 +66,15 @@ The app currently stores users in:
 
   data/node-db.json
 
-In Render, the app is now configured to store this data on the mounted disk at:
+On the free Render plan, the app stores this data in ephemeral storage at:
 
-  /var/data/node-db.json
+  /tmp/godstime-lodge-data/node-db.json
 
-If you remove the disk, the app falls back to the local ./data folder again.
+That means the demo is fine for testing and previewing, but data resets on redeploy or restart.
 
 Production notes:
   - The server now exposes /healthz and checks that the data directory/database are readable.
-  - Sessions are stored in the same persistent data file, so logins survive service restarts.
+  - Sessions and demo data are stored in ephemeral storage on the free plan, so they reset on restart or redeploy.
   - Startup logs no longer print the admin password.
   - Keep ADMIN_PASSWORD set to a strong secret in Render before first launch.
 
@@ -87,3 +82,16 @@ Tip:
 The Blueprint now marks ADMIN_PASSWORD as a secret prompt in Render
 (`sync: false`), so Render should ask for it during the first Blueprint setup.
 If you skip it, the app falls back to the default admin password.
+
+Deployment checklist
+--------------------
+Before pushing to Render, confirm:
+
+  - `npm ci` succeeds locally.
+  - `npm test` passes.
+  - `render.yaml` keeps `buildCommand: npm ci && npm test`.
+  - `render.yaml` keeps `startCommand: npm start`.
+  - `render.yaml` keeps `healthCheckPath: /healthz`.
+  - `render.yaml` keeps `plan: free` and uses ephemeral storage at `/tmp/godstime-lodge-data`.
+  - `ADMIN_PASSWORD` is set to a secret value.
+  - CircleCI uses `npm ci` instead of `npm install`.

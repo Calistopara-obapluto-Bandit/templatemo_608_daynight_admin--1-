@@ -317,11 +317,93 @@ function initTenantEmailForms() {
     });
 }
 
+function initRealtimeNotifications() {
+    const liveReminders = document.querySelector('[data-live-reminders]');
+    const path = window.location.pathname || '';
+    const isDashboard = path === '/tenant/dashboard' || path === '/admin/dashboard';
+    if (!isDashboard || !liveReminders || typeof EventSource === 'undefined') return;
+
+    let currentVersion = null;
+    let isReady = false;
+    let toastStack = null;
+
+    const ensureToastStack = () => {
+        if (toastStack) return toastStack;
+        toastStack = document.createElement('div');
+        toastStack.className = 'live-toast-stack';
+        document.body.appendChild(toastStack);
+        return toastStack;
+    };
+
+    const showToast = (message, tone = 'accent') => {
+        const stack = ensureToastStack();
+        const toast = document.createElement('div');
+        toast.className = `live-toast ${tone}`;
+        toast.textContent = message;
+        stack.appendChild(toast);
+        window.setTimeout(() => {
+            toast.classList.add('leaving');
+            window.setTimeout(() => toast.remove(), 250);
+        }, 3200);
+    };
+
+    const refreshNotifications = async (showVisualCue) => {
+        try {
+            const response = await fetch('/api/notifications', {
+                headers: { 'Accept': 'application/json' },
+                cache: 'no-store'
+            });
+            if (!response.ok) return;
+            const payload = await response.json();
+            if (!payload || !payload.html) return;
+
+            const target = document.querySelector('[data-live-reminders]');
+            if (target) {
+                target.outerHTML = payload.html;
+            }
+
+            if (showVisualCue && payload.items && payload.items.length) {
+                showToast(payload.items[0].title, payload.items[0].tone || 'accent');
+            } else if (showVisualCue) {
+                showToast('Notifications updated.', 'success');
+            }
+
+            currentVersion = payload.version;
+            isReady = true;
+        } catch (error) {
+            // Keep the dashboard usable even if the live stream fails.
+        }
+    };
+
+    refreshNotifications(false);
+
+    const stream = new EventSource('/api/notifications/stream');
+    stream.onmessage = (event) => {
+        try {
+            const payload = JSON.parse(event.data || '{}');
+            if (currentVersion === null) {
+                currentVersion = payload.version;
+                return;
+            }
+            if (payload.version !== currentVersion) {
+                refreshNotifications(isReady);
+            }
+        } catch (error) {
+            // Ignore malformed events and keep the stream alive.
+        }
+    };
+
+    stream.onerror = () => {
+        // EventSource reconnects on its own; no extra work needed here.
+    };
+}
+
 // ===== Initialize =====
 document.addEventListener('DOMContentLoaded', function() {
     initTheme();
     setGreeting();
     initTenantEmailForms();
+    initRealtimeNotifications();
     
     if (document.querySelector('.kanban-board')) {
         initKanban();

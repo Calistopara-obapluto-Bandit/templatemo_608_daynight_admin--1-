@@ -19,6 +19,8 @@ const DB_PATH = path.join(DATA_DIR, "node-db.json");
 const PUBLIC_DIR = path.join(__dirname, "public");
 const ASSETS_DIR = path.join(PUBLIC_DIR, "assets");
 const PAYMENT_SYMBOL_MARKUP = '<text x="12" y="16" text-anchor="middle" font-size="15" font-weight="700" fill="currentColor">₦</text>';
+let notificationVersion = 0;
+const notificationClients = new Set();
 
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -85,6 +87,7 @@ function createBill({ tenantId, title, amount, dueDate, status = "unpaid" }) {
 }
 
 function createPayment({ tenantId, billId, amount, note }) {
+  const createdAt = new Date().toISOString();
   return {
     id: randomId(12),
     tenantId,
@@ -92,18 +95,40 @@ function createPayment({ tenantId, billId, amount, note }) {
     amount: Number(amount) || 0,
     note: String(note || "").trim(),
     status: "pending",
-    createdAt: new Date().toISOString(),
+    createdAt,
+    reviewedAt: "",
+    statusHistory: [
+      {
+        status: "pending",
+        detail: "Payment submitted and waiting for review.",
+        at: createdAt,
+      },
+    ],
   };
 }
 
 function createMaintenanceRequest({ tenantId, title, description }) {
+  const createdAt = new Date().toISOString();
+  const slaHours = 72;
   return {
     id: randomId(12),
     tenantId,
     title: String(title || "").trim(),
     description: String(description || "").trim(),
     status: "open",
-    createdAt: new Date().toISOString(),
+    createdAt,
+    slaHours,
+    dueAt: new Date(Date.parse(createdAt) + slaHours * 60 * 60 * 1000).toISOString(),
+    firstResponseAt: "",
+    resolvedAt: "",
+    updatedAt: createdAt,
+    statusHistory: [
+      {
+        status: "open",
+        detail: "Maintenance request submitted.",
+        at: createdAt,
+      },
+    ],
   };
 }
 
@@ -148,8 +173,44 @@ function normalizeDb(db) {
       : [],
     sessions: Array.isArray(db && db.sessions) ? db.sessions : [],
     bills: Array.isArray(db && db.bills) ? db.bills : [],
-    payments: Array.isArray(db && db.payments) ? db.payments : [],
-    maintenanceRequests: Array.isArray(db && db.maintenanceRequests) ? db.maintenanceRequests : [],
+    payments: Array.isArray(db && db.payments)
+      ? db.payments.map((payment) => ({
+          ...payment,
+          note: normalizeLine(payment.note || "", 120),
+          status: String(payment.status || "pending").trim() || "pending",
+          createdAt: String(payment.createdAt || "").trim(),
+          reviewedAt: String(payment.reviewedAt || "").trim(),
+          statusHistory: normalizeStatusHistory(
+            payment.statusHistory,
+            "pending",
+            "Payment submitted and waiting for review.",
+            payment.createdAt || new Date().toISOString()
+          ),
+        }))
+      : [],
+    maintenanceRequests: Array.isArray(db && db.maintenanceRequests)
+      ? db.maintenanceRequests.map((request) => ({
+          ...request,
+          title: normalizeLine(request.title || "", 80),
+          description: normalizeLine(request.description || "", 400),
+          status: String(request.status || "open").trim() || "open",
+          createdAt: String(request.createdAt || "").trim(),
+          slaHours: Math.max(1, Number(request.slaHours) || 72),
+          dueAt: String(request.dueAt || "").trim() || new Date(getMaintenanceDueAt({
+            createdAt: String(request.createdAt || "").trim(),
+            slaHours: Math.max(1, Number(request.slaHours) || 72),
+          })).toISOString(),
+          firstResponseAt: String(request.firstResponseAt || "").trim(),
+          resolvedAt: String(request.resolvedAt || "").trim(),
+          updatedAt: String(request.updatedAt || request.createdAt || "").trim(),
+          statusHistory: normalizeStatusHistory(
+            request.statusHistory,
+            "open",
+            "Maintenance request submitted.",
+            request.createdAt || new Date().toISOString()
+          ),
+        }))
+      : [],
     projects: Array.isArray(db && db.projects) ? db.projects : [],
     settings: {
       ...defaultSettings(),
@@ -264,6 +325,18 @@ function sendJson(res, status, payload, headers = {}) {
   res.end(JSON.stringify(payload));
 }
 
+function notifyRealtimeChange() {
+  notificationVersion += 1;
+  const payload = `data: ${JSON.stringify({ version: notificationVersion })}\n\n`;
+  for (const client of [...notificationClients]) {
+    try {
+      client.res.write(payload);
+    } catch (error) {
+      notificationClients.delete(client);
+    }
+  }
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let data = "";
@@ -340,6 +413,96 @@ function compareNewestFirst(a, b) {
 
 function compareBillTimeline(a, b) {
   return parseTimestamp(a.dueDate || a.createdAt) - parseTimestamp(b.dueDate || b.createdAt);
+}
+
+function formatShortDuration(ms) {
+  const totalMinutes = Math.max(0, Math.round(Math.abs(ms) / 60000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours <= 0) return `${minutes}m`;
+  if (minutes <= 0) return `${hours}h`;
+  return `${hours}h ${minutes}m`;
+}
+
+function getMaintenanceDueAt(request) {
+  const dueAt = request && request.dueAt ? Date.parse(request.dueAt) : Number.NaN;
+  if (Number.isFinite(dueAt)) return dueAt;
+  const createdAt = request && request.createdAt ? Date.parse(request.createdAt) : Number.NaN;
+  const slaHours = Math.max(1, Number(request && request.slaHours) || 72);
+  if (Number.isFinite(createdAt)) return createdAt + slaHours * 60 * 60 * 1000;
+  return Date.now() + slaHours * 60 * 60 * 1000;
+}
+
+function getMaintenanceSlaState(request) {
+  if (!request) {
+    return {
+      tone: "blue",
+      label: "No SLA",
+      detail: "No maintenance request selected.",
+      dueAt: "",
+    };
+  }
+  const dueAtMs = getMaintenanceDueAt(request);
+  const dueAt = new Date(dueAtMs).toISOString();
+  if (request.status === "resolved") {
+    return {
+      tone: "green",
+      label: "Resolved",
+      detail: `Resolved ${request.resolvedAt ? `on ${formatDateTime(request.resolvedAt)}` : "within the maintenance window"}.`,
+      dueAt,
+    };
+  }
+  const remaining = dueAtMs - Date.now();
+  if (remaining < 0) {
+    return {
+      tone: "red",
+      label: `Overdue by ${formatShortDuration(remaining)}`,
+      detail: `Target due ${formatDateTime(dueAt)}.`,
+      dueAt,
+    };
+  }
+  if (remaining <= 6 * 60 * 60 * 1000) {
+    return {
+      tone: "orange",
+      label: `Due in ${formatShortDuration(remaining)}`,
+      detail: `Target due ${formatDateTime(dueAt)}.`,
+      dueAt,
+    };
+  }
+  return {
+    tone: "blue",
+    label: `Due ${formatDateTime(dueAt)}`,
+    detail: `${formatShortDuration(remaining)} left before the SLA target.`,
+    dueAt,
+  };
+}
+
+function createStatusHistoryEntry(status, detail, at = new Date().toISOString()) {
+  return {
+    status: String(status || "").trim(),
+    detail: normalizeLine(detail || "", 160),
+    at: String(at || "").trim() || new Date().toISOString(),
+  };
+}
+
+function normalizeStatusHistory(entries, fallbackStatus, fallbackDetail, fallbackAt) {
+  const normalized = Array.isArray(entries)
+    ? entries
+        .map((entry) => ({
+          status: String((entry && entry.status) || "").trim(),
+          detail: normalizeLine((entry && entry.detail) || "", 160),
+          at: String((entry && entry.at) || "").trim(),
+        }))
+        .filter((entry) => entry.status && entry.at)
+    : [];
+  if (normalized.length) return normalized;
+  return [createStatusHistoryEntry(fallbackStatus, fallbackDetail, fallbackAt)];
+}
+
+function formatStatusLabel(status) {
+  return String(status || "")
+    .replace(/-/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function isValidDateInput(value) {
@@ -716,6 +879,29 @@ function renderActivityFeed(items, emptyMessage) {
   return items.length ? items.join("") : `<div style="padding:1rem; color:var(--text-secondary);">${escapeHtml(emptyMessage)}</div>`;
 }
 
+function renderStatusTrail(entries, emptyMessage) {
+  const items = Array.isArray(entries) && entries.length
+    ? entries
+        .map((entry) => {
+          const tone = ["open", "in-progress", "resolved"].includes(entry.status)
+            ? getMaintenanceStatusTone(entry.status)
+            : getPaymentStatusTone(entry.status);
+          return `<div class="status-timeline-item">
+            <div class="status-timeline-marker ${escapeHtml(tone)}"></div>
+            <div class="status-timeline-content">
+              <div class="status-timeline-head">
+                <strong>${escapeHtml(formatStatusLabel(entry.status))}</strong>
+                <span>${escapeHtml(formatDateTime(entry.at))}</span>
+              </div>
+              <p>${escapeHtml(entry.detail || "")}</p>
+            </div>
+          </div>`;
+        })
+        .join("")
+    : `<div style="padding:1rem; color:var(--text-secondary);">${escapeHtml(emptyMessage)}</div>`;
+  return `<div class="status-timeline">${items}</div>`;
+}
+
 function renderReminderSection(title, subtitle, items, emptyMessage) {
   const body = items.length
     ? items
@@ -741,6 +927,203 @@ function renderReminderSection(title, subtitle, items, emptyMessage) {
       ${body}
     </div>
   </div>`;
+}
+
+function buildTenantReminderItems(user, db) {
+  const bills = getTenantBillOptions(db, user.id);
+  const payments = db.payments
+    .filter((payment) => payment.tenantId === user.id)
+    .sort(compareNewestFirst);
+  const requests = db.maintenanceRequests
+    .filter((request) => request.tenantId === user.id)
+    .sort(compareNewestFirst);
+  const openBills = bills.filter((bill) => getBillStatus(bill) !== "paid");
+  const pendingPayments = payments.filter((payment) => payment.status === "pending");
+  const resolvedRequests = requests.filter((request) => request.status === "resolved");
+  const todayTs = Date.now();
+  const nextBill = openBills
+    .slice()
+    .sort((a, b) => {
+      const aTime = isValidDateInput(a.dueDate) ? Date.parse(`${a.dueDate}T00:00:00Z`) : Number.POSITIVE_INFINITY;
+      const bTime = isValidDateInput(b.dueDate) ? Date.parse(`${b.dueDate}T00:00:00Z`) : Number.POSITIVE_INFINITY;
+      return aTime - bTime;
+    })[0] || null;
+  const overdueBills = openBills.filter((bill) => isValidDateInput(bill.dueDate) && Date.parse(`${bill.dueDate}T23:59:59Z`) < todayTs);
+  const upcomingBills = openBills.filter((bill) => {
+    if (!isValidDateInput(bill.dueDate)) return false;
+    const dueTs = Date.parse(`${bill.dueDate}T23:59:59Z`);
+    const daysAway = Math.ceil((dueTs - todayTs) / 86400000);
+    return daysAway >= 0 && daysAway <= 7;
+  });
+  const items = [];
+  if (overdueBills.length) {
+    items.push({
+      tone: "warning",
+      label: "Due now",
+      title: "You have overdue bills",
+      detail: `${overdueBills.length} bill(s) are past due. Paying them first will keep your account in good standing.`,
+      meta: `Outstanding ${formatCurrency(overdueBills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0))}`,
+      href: "/tenant/bills",
+      actionLabel: "Pay attention",
+    });
+  } else if (upcomingBills.length) {
+    items.push({
+      tone: "accent",
+      label: "Upcoming",
+      title: "A bill is due soon",
+      detail: `${upcomingBills.length} bill(s) will be due within the next 7 days.`,
+      meta: nextBill && isValidDateInput(nextBill.dueDate) ? `Next due ${formatDateOnly(`${nextBill.dueDate}T00:00:00Z`)}` : "Review schedule",
+      href: "/tenant/bills",
+      actionLabel: "Review bills",
+    });
+  }
+  if (pendingPayments.length) {
+    items.push({
+      tone: "accent",
+      label: "Pending",
+      title: "A payment is waiting for approval",
+      detail: `${pendingPayments.length} payment submission(s) are still being reviewed by management.`,
+      meta: `Latest ${formatCurrency(pendingPayments[0].amount)}`,
+      href: "/tenant/payments",
+      actionLabel: "Check status",
+    });
+  }
+  if (resolvedRequests.length) {
+    items.push({
+      tone: "success",
+      label: "Update",
+      title: "A maintenance request has been resolved",
+      detail: `Management marked ${resolvedRequests[0].title} as resolved. Review it and reopen only if needed.`,
+      meta: formatDateTime(resolvedRequests[0].createdAt),
+      href: "/tenant/requests",
+      actionLabel: "View requests",
+    });
+  }
+  if (db.settings.announcement && db.settings.announcementUpdatedAt) {
+    items.push({
+      tone: "orange",
+      label: "Notice",
+      title: "Management posted a lodge update",
+      detail: db.settings.announcement,
+      meta: formatDateTime(db.settings.announcementUpdatedAt),
+      href: "/tenant/dashboard",
+      actionLabel: "Read update",
+    });
+  }
+  return items;
+}
+
+function buildAdminReminderItems(db) {
+  const bills = [...db.bills].sort(compareNewestFirst);
+  const payments = [...db.payments].sort(compareNewestFirst);
+  const maintenanceRequests = [...db.maintenanceRequests].sort(compareNewestFirst);
+  const openBills = bills.filter((bill) => getBillStatus(bill) !== "paid");
+  const pendingPayments = payments.filter((payment) => payment.status === "pending");
+  const openMaintenance = maintenanceRequests.filter((request) => request.status !== "resolved");
+  const pendingInvites = db.tenantInvites.filter((invite) => !invite.usedAt).sort(compareNewestFirst);
+  const latestPendingPayment = pendingPayments[0] || null;
+  const latestOpenMaintenance = openMaintenance[0] || null;
+  const latestPendingInvite = pendingInvites[0] || null;
+  const todayTs = Date.now();
+  const overdueBills = openBills.filter((bill) => isValidDateInput(bill.dueDate) && Date.parse(`${bill.dueDate}T23:59:59Z`) < todayTs);
+  const items = [];
+  if (pendingPayments.length) {
+    items.push({
+      tone: "warning",
+      label: "Approval",
+      title: "Pending payments need review",
+      detail: `${pendingPayments.length} payment submission(s) are still waiting for approval or rejection.`,
+      meta: latestPendingPayment ? `${formatCurrency(latestPendingPayment.amount)} latest` : "Review queue",
+      href: "/admin/payments",
+      actionLabel: "Review now",
+    });
+  }
+  if (overdueBills.length) {
+    items.push({
+      tone: "accent",
+      label: "Overdue",
+      title: "Some tenant bills are past due",
+      detail: `${overdueBills.length} bill(s) are overdue and may need follow-up with tenants.`,
+      meta: formatCurrency(overdueBills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0)),
+      href: "/admin/bills",
+      actionLabel: "Check bills",
+    });
+  }
+  if (openMaintenance.length) {
+    items.push({
+      tone: "orange",
+      label: "Open",
+      title: "Maintenance requests still need attention",
+      detail: `${openMaintenance.length} unresolved request(s) remain in the maintenance queue.`,
+      meta: latestOpenMaintenance ? latestOpenMaintenance.title : "Open queue",
+      href: "/admin/maintenance",
+      actionLabel: "Open queue",
+    });
+  }
+  if (pendingInvites.length) {
+    items.push({
+      tone: "warning",
+      label: "Invite",
+      title: "Approved tenant invites are unclaimed",
+      detail: `${pendingInvites.length} invite(s) have been created but not yet used by the approved tenants.`,
+      meta: latestPendingInvite ? latestPendingInvite.fullName || latestPendingInvite.email : "Pending invites",
+      href: "/admin/tenants",
+      actionLabel: "Manage invites",
+    });
+  }
+  if (!db.settings.announcement) {
+    items.push({
+      tone: "success",
+      label: "Tip",
+      title: "Post a short update for tenants",
+      detail: "A current announcement helps tenants notice billing or operations updates without contacting management.",
+      meta: "Admin settings",
+      href: "/admin/settings",
+      actionLabel: "Open settings",
+    });
+  }
+  return items;
+}
+
+function renderTenantReminderSection(user, db) {
+  return `<div data-live-reminders="tenant">${renderReminderSection(
+    "Notifications & Reminders",
+    "Helpful prompts based on your bills, requests, and recent management updates.",
+    buildTenantReminderItems(user, db),
+    "You are all caught up. New reminders will appear here when something needs your attention."
+  )}</div>`;
+}
+
+function renderAdminReminderSection(db) {
+  return `<div data-live-reminders="admin">${renderReminderSection(
+    "Notifications & Reminders",
+    "Operational prompts to help management stay ahead of approvals, follow-ups, and tenant communication.",
+    buildAdminReminderItems(db),
+    "Operations look clear right now. New reminders will appear when follow-up is needed."
+  )}</div>`;
+}
+
+function buildRealtimeNotificationPayload(user, db) {
+  if (user.role === "tenant") {
+    const items = buildTenantReminderItems(user, db);
+    return {
+      ok: true,
+      role: "tenant",
+      version: notificationVersion,
+      count: items.length,
+      items,
+      html: renderTenantReminderSection(user, db),
+    };
+  }
+  const items = buildAdminReminderItems(db);
+  return {
+    ok: true,
+    role: "admin",
+    version: notificationVersion,
+    count: items.length,
+    items,
+    html: renderAdminReminderSection(db),
+  };
 }
 
 function renderAnnouncementCard(message, title = "Announcement", updatedAt = "") {
@@ -869,10 +1252,8 @@ function tenantDashboardView(user, db, flash = "") {
   const openBills = bills.filter((bill) => getBillStatus(bill) !== "paid");
   const pendingPayments = payments.filter((payment) => payment.status === "pending");
   const openRequests = requests.filter((request) => request.status !== "resolved");
-  const resolvedRequests = requests.filter((request) => request.status === "resolved");
   const totalDue = openBills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0);
   const totalPaid = payments.filter((payment) => payment.status === "approved").reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
-  const todayTs = Date.now();
   const nextBill = openBills
     .slice()
     .sort((a, b) => {
@@ -880,68 +1261,6 @@ function tenantDashboardView(user, db, flash = "") {
       const bTime = isValidDateInput(b.dueDate) ? Date.parse(`${b.dueDate}T00:00:00Z`) : Number.POSITIVE_INFINITY;
       return aTime - bTime;
     })[0] || null;
-  const overdueBills = openBills.filter((bill) => isValidDateInput(bill.dueDate) && Date.parse(`${bill.dueDate}T23:59:59Z`) < todayTs);
-  const upcomingBills = openBills.filter((bill) => {
-    if (!isValidDateInput(bill.dueDate)) return false;
-    const dueTs = Date.parse(`${bill.dueDate}T23:59:59Z`);
-    const daysAway = Math.ceil((dueTs - todayTs) / 86400000);
-    return daysAway >= 0 && daysAway <= 7;
-  });
-  const tenantReminders = [];
-  if (overdueBills.length) {
-    tenantReminders.push({
-      tone: "warning",
-      label: "Due now",
-      title: "You have overdue bills",
-      detail: `${overdueBills.length} bill(s) are past due. Paying them first will keep your account in good standing.`,
-      meta: `Outstanding ${formatCurrency(overdueBills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0))}`,
-      href: "/tenant/bills",
-      actionLabel: "Pay attention",
-    });
-  } else if (upcomingBills.length) {
-    tenantReminders.push({
-      tone: "accent",
-      label: "Upcoming",
-      title: "A bill is due soon",
-      detail: `${upcomingBills.length} bill(s) will be due within the next 7 days.`,
-      meta: nextBill && isValidDateInput(nextBill.dueDate) ? `Next due ${formatDateOnly(`${nextBill.dueDate}T00:00:00Z`)}` : "Review schedule",
-      href: "/tenant/bills",
-      actionLabel: "Review bills",
-    });
-  }
-  if (pendingPayments.length) {
-    tenantReminders.push({
-      tone: "accent",
-      label: "Pending",
-      title: "A payment is waiting for approval",
-      detail: `${pendingPayments.length} payment submission(s) are still being reviewed by management.`,
-      meta: `Latest ${formatCurrency(pendingPayments[0].amount)}`,
-      href: "/tenant/payments",
-      actionLabel: "Check status",
-    });
-  }
-  if (resolvedRequests.length) {
-    tenantReminders.push({
-      tone: "success",
-      label: "Update",
-      title: "A maintenance request has been resolved",
-      detail: `Management marked ${resolvedRequests[0].title} as resolved. Review it and reopen only if needed.`,
-      meta: formatDateTime(resolvedRequests[0].createdAt),
-      href: "/tenant/requests",
-      actionLabel: "View requests",
-    });
-  }
-  if (db.settings.announcement && db.settings.announcementUpdatedAt) {
-    tenantReminders.push({
-      tone: "orange",
-      label: "Notice",
-      title: "Management posted a lodge update",
-      detail: db.settings.announcement,
-      meta: formatDateTime(db.settings.announcementUpdatedAt),
-      href: "/tenant/dashboard",
-      actionLabel: "Read update",
-    });
-  }
   const tenantPriorities = [
     {
       tone: totalDue > 0 ? "warning" : "success",
@@ -965,13 +1284,15 @@ function tenantDashboardView(user, db, flash = "") {
     },
     {
       tone: openRequests.length ? "orange" : "success",
-      title: openRequests.length ? "Maintenance follow-up is still open" : "No open maintenance issues",
+      title: openRequests.length ? "Maintenance has a visible trail" : "Maintenance stays on record",
       detail: openRequests.length
-        ? `${openRequests.length} maintenance request(s) still need attention or updates.`
-        : "You do not have any unresolved maintenance requests right now.",
+        ? `${openRequests.length} maintenance request(s) still need attention, but every update is timestamped so you can track progress.`
+        : "Every maintenance request keeps a timestamped trail, even after it is resolved.",
       actionHref: "/tenant/requests",
-      actionLabel: openRequests.length ? "Track requests" : "Create request",
-      meta: openRequests[0] ? `Latest request: ${escapeHtml(openRequests[0].title)}` : "Everything is currently resolved",
+      actionLabel: openRequests.length ? "Track request trail" : "Create request",
+      meta: openRequests[0]
+        ? `Updated ${formatDateTime(openRequests[0].updatedAt || openRequests[0].createdAt)}`
+        : "Every ticket keeps a trail",
     },
   ];
   const priorityCards = tenantPriorities
@@ -1099,12 +1420,7 @@ function tenantDashboardView(user, db, flash = "") {
       <main class="main-content">
         ${flashBanner}
         ${renderAnnouncementCard(db.settings.announcement, "Lodge Update", db.settings.announcementUpdatedAt)}
-        ${renderReminderSection(
-          "Notifications & Reminders",
-          "Helpful prompts based on your bills, requests, and recent management updates.",
-          tenantReminders,
-          "You are all caught up. New reminders will appear here when something needs your attention."
-        )}
+        ${renderTenantReminderSection(user, db)}
         <div class="page-header">
           <h1 class="greeting">Welcome, ${escapeHtml(user.fullName)}</h1>
           <p class="greeting-sub">Your account is live for <strong>${escapeHtml(user.unit || "Unit not assigned yet")}</strong>.</p>
@@ -1293,6 +1609,10 @@ function tenantPaymentsPage(user, db, flash = "") {
         badgeTone: getPaymentStatusTone(payment.status),
       })).join("")
     : `<div style="padding:1rem; color:var(--text-secondary);">No payments submitted yet.</div>`;
+  const latestPayment = payments[0] || null;
+  const latestPaymentTrail = latestPayment
+    ? renderStatusTrail(latestPayment.statusHistory, "This payment does not have a review trail yet.")
+    : `<div style="padding:1rem; color:var(--text-secondary);">Submit a payment to build a proof trail.</div>`;
 
   return layoutPage({
     title: "My Payments - Godstime Lodge",
@@ -1317,6 +1637,23 @@ function tenantPaymentsPage(user, db, flash = "") {
           <div class="card-scroll"><div class="card-scroll-inner" style="min-width: 340px;"><div class="activity-feed">${items}</div></div></div>
         </div>
       </div>
+      <div class="card" style="margin-top:1.5rem;">
+        <div class="card-header">
+          <div>
+            <h3 class="card-title">Payment Receipt Trail</h3>
+            <p class="card-subtitle">A timestamped proof trail for your latest submission</p>
+          </div>
+        </div>
+        <div style="padding:1rem 1.25rem;">${latestPayment ? `
+          <div style="display:grid; gap:0.5rem; margin-bottom:1rem; color:var(--text-secondary);">
+            <div><strong style="color:var(--text-primary);">Latest amount:</strong> ${formatCurrency(latestPayment.amount)}</div>
+            <div><strong style="color:var(--text-primary);">Submitted:</strong> ${formatDateTime(latestPayment.createdAt)}</div>
+            <div><strong style="color:var(--text-primary);">Reviewed:</strong> ${latestPayment.reviewedAt ? formatDateTime(latestPayment.reviewedAt) : "Waiting for review"}</div>
+          </div>
+        ` : ""}
+        ${latestPaymentTrail}
+        </div>
+      </div>
     </main>`,
   });
 }
@@ -1326,6 +1663,10 @@ function tenantMaintenancePage(user, db, flash = "") {
     .filter((request) => request.tenantId === user.id)
     .sort(compareNewestFirst);
   const resolvedRequests = requests.filter((request) => request.status === "resolved");
+  const openRequests = requests.filter((request) => request.status !== "resolved");
+  const overdueRequests = openRequests.filter((request) => getMaintenanceSlaState(request).tone === "red");
+  const latestRequest = requests[0] || null;
+  const latestRequestSla = getMaintenanceSlaState(latestRequest);
   const items = requests.length
     ? requests.map((request) => renderActivityItem({
         tone: "orange",
@@ -1337,6 +1678,9 @@ function tenantMaintenancePage(user, db, flash = "") {
         badgeTone: getMaintenanceStatusTone(request.status),
       })).join("")
     : `<div style="padding:1rem; color:var(--text-secondary);">No maintenance requests yet.</div>`;
+  const latestRequestTrail = latestRequest
+    ? renderStatusTrail(latestRequest.statusHistory, "This request does not have a status trail yet.")
+    : `<div style="padding:1rem; color:var(--text-secondary);">Create a request to build a status trail.</div>`;
 
   return layoutPage({
     title: "Maintenance - Godstime Lodge",
@@ -1347,6 +1691,28 @@ function tenantMaintenancePage(user, db, flash = "") {
     body: `<main class="main-content">
       ${sectionHeader("Maintenance Requests", "Send issues to management and track the status here.", flash)}
       ${renderAnnouncementCard(db.settings.announcement, "Service Notice", db.settings.announcementUpdatedAt)}
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Open Requests</div>
+          <div class="stat-value">${openRequests.length}</div>
+          <div class="stat-change positive">Requests still in the queue</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Overdue</div>
+          <div class="stat-value">${overdueRequests.length}</div>
+          <div class="stat-change ${overdueRequests.length ? "negative" : "positive"}">${overdueRequests.length ? "Outside the SLA target" : "Within the SLA target"}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">First Response</div>
+          <div class="stat-value">${latestRequest && latestRequest.firstResponseAt ? formatDateTime(latestRequest.firstResponseAt) : "Waiting"}</div>
+          <div class="stat-change positive">When management first responded</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">SLA Target</div>
+          <div class="stat-value">${latestRequest ? latestRequestSla.label : "72h"}</div>
+          <div class="stat-change positive">${latestRequest ? latestRequestSla.detail : "Each ticket starts with a 72 hour target"}</div>
+        </div>
+      </div>
       <div class="two-col">
         <div class="card">
           <div class="card-header"><div><h3 class="card-title">New Request</h3><p class="card-subtitle">Tell management what needs attention</p></div></div>
@@ -1375,6 +1741,25 @@ function tenantMaintenancePage(user, db, flash = "") {
           })),
           "When management resolves a request, it will show here."
         )}</div></div></div>
+      </div>
+      <div class="card" style="margin-top:1.5rem;">
+        <div class="card-header">
+          <div>
+            <h3 class="card-title">Request Status Trail</h3>
+            <p class="card-subtitle">See the full path from open to resolved for your latest ticket and its SLA target</p>
+          </div>
+        </div>
+        <div style="padding:1rem 1.25rem;">
+          ${latestRequest ? `
+            <div style="display:grid; gap:0.5rem; margin-bottom:1rem; color:var(--text-secondary);">
+              <div><strong style="color:var(--text-primary);">Latest issue:</strong> ${escapeHtml(latestRequest.title)}</div>
+              <div><strong style="color:var(--text-primary);">Opened:</strong> ${formatDateTime(latestRequest.createdAt)}</div>
+              <div><strong style="color:var(--text-primary);">Last updated:</strong> ${formatDateTime(latestRequest.updatedAt || latestRequest.createdAt)}</div>
+              <div><strong style="color:var(--text-primary);">SLA:</strong> ${escapeHtml(latestRequestSla.label)} - ${escapeHtml(latestRequestSla.detail)}</div>
+            </div>
+          ` : ""}
+          ${latestRequestTrail}
+        </div>
       </div>
     </main>`,
   });
@@ -1705,64 +2090,6 @@ function adminDashboardView(user, db, flash = "") {
   const latestOpenBill = openBills[0] || null;
   const latestOpenMaintenance = openMaintenance[0] || null;
   const latestPendingInvite = pendingInvites[0] || null;
-  const todayTs = Date.now();
-  const overdueBills = openBills.filter((bill) => isValidDateInput(bill.dueDate) && Date.parse(`${bill.dueDate}T23:59:59Z`) < todayTs);
-  const adminReminders = [];
-  if (pendingPayments.length) {
-    adminReminders.push({
-      tone: "warning",
-      label: "Approval",
-      title: "Pending payments need review",
-      detail: `${pendingPayments.length} payment submission(s) are still waiting for approval or rejection.`,
-      meta: latestPendingPayment ? `${formatCurrency(latestPendingPayment.amount)} latest` : "Review queue",
-      href: "/admin/payments",
-      actionLabel: "Review now",
-    });
-  }
-  if (overdueBills.length) {
-    adminReminders.push({
-      tone: "accent",
-      label: "Overdue",
-      title: "Some tenant bills are past due",
-      detail: `${overdueBills.length} bill(s) are overdue and may need follow-up with tenants.`,
-      meta: formatCurrency(overdueBills.reduce((sum, bill) => sum + (Number(bill.amount) || 0), 0)),
-      href: "/admin/bills",
-      actionLabel: "Check bills",
-    });
-  }
-  if (openMaintenance.length) {
-    adminReminders.push({
-      tone: "orange",
-      label: "Open",
-      title: "Maintenance requests still need attention",
-      detail: `${openMaintenance.length} unresolved request(s) remain in the maintenance queue.`,
-      meta: latestOpenMaintenance ? latestOpenMaintenance.title : "Open queue",
-      href: "/admin/maintenance",
-      actionLabel: "Open queue",
-    });
-  }
-  if (pendingInvites.length) {
-    adminReminders.push({
-      tone: "warning",
-      label: "Invite",
-      title: "Approved tenant invites are unclaimed",
-      detail: `${pendingInvites.length} invite(s) have been created but not yet used by the approved tenants.`,
-      meta: latestPendingInvite ? latestPendingInvite.fullName || latestPendingInvite.email : "Pending invites",
-      href: "/admin/tenants",
-      actionLabel: "Manage invites",
-    });
-  }
-  if (!db.settings.announcement) {
-    adminReminders.push({
-      tone: "success",
-      label: "Tip",
-      title: "Post a short update for tenants",
-      detail: "A current announcement helps tenants notice billing or operations updates without contacting management.",
-      meta: "Admin settings",
-      href: "/admin/settings",
-      actionLabel: "Open settings",
-    });
-  }
   const adminPriorities = [
     {
       tone: pendingPayments.length ? "warning" : "success",
@@ -1980,12 +2307,7 @@ function adminDashboardView(user, db, flash = "") {
       ${shell.topNav}
       <main class="main-content">
         ${flashBanner}
-        ${renderReminderSection(
-          "Notifications & Reminders",
-          "Operational prompts to help management stay ahead of approvals, follow-ups, and tenant communication.",
-          adminReminders,
-          "Operations look clear right now. New reminders will appear when follow-up is needed."
-        )}
+        ${renderAdminReminderSection(db)}
         <div class="page-header">
           <h1 class="greeting">Welcome back, ${escapeHtml(user.fullName || "Admin")}</h1>
           <p class="greeting-sub">This dashboard now uses your live tenant and session data.</p>
@@ -2754,22 +3076,40 @@ function adminMaintenancePage(user, db, flash = "", filters = {}) {
   const query = normalizeLine(filters.q, 80);
   const statusFilter = normalizeLine(filters.status, 20);
   const requests = [...db.maintenanceRequests]
-    .filter((request) => !statusFilter || request.status === statusFilter)
+    .filter((request) => {
+      if (!statusFilter) return true;
+      if (statusFilter === "overdue") {
+        return request.status !== "resolved" && getMaintenanceSlaState(request).tone === "red";
+      }
+      return request.status === statusFilter;
+    })
     .filter((request) => {
       const tenant = db.users.find((item) => item.id === request.tenantId);
       return matchesSearch([request.title, request.description, tenant ? tenant.fullName : "", tenant ? tenant.email : ""], query);
     })
     .sort(compareNewestFirst);
+  const openRequests = requests.filter((request) => request.status !== "resolved");
+  const overdueRequests = openRequests.filter((request) => getMaintenanceSlaState(request).tone === "red");
+  const urgentRequests = openRequests.filter((request) => getMaintenanceSlaState(request).tone === "orange");
+  const latestOpenRequest = openRequests[0] || null;
+  const latestOpenRequestSla = getMaintenanceSlaState(latestOpenRequest);
   const rows = requests.length
     ? requests
         .map((request) => {
           const tenant = db.users.find((item) => item.id === request.tenantId);
           const isResolved = request.status === "resolved";
+          const sla = getMaintenanceSlaState(request);
           return `<tr>
             <td style="padding:0.9rem 0.75rem;"><strong>${escapeHtml(tenant ? tenant.fullName || tenant.email : "Unknown tenant")}</strong></td>
             <td style="padding:0.9rem 0.75rem;">${escapeHtml(request.title)}</td>
             <td style="padding:0.9rem 0.75rem;">${escapeHtml(request.description)}</td>
             <td style="padding:0.9rem 0.75rem;"><span class="badge badge-${getMaintenanceStatusTone(request.status)}">${escapeHtml(request.status)}</span></td>
+            <td style="padding:0.9rem 0.75rem;">
+              <div class="sla-mini">
+                <span class="badge badge-${escapeHtml(sla.tone)}">${escapeHtml(sla.label)}</span>
+                <div class="sla-mini-detail">${escapeHtml(sla.detail)}</div>
+              </div>
+            </td>
             <td style="padding:0.9rem 0.75rem;">
               <form method="post" action="/admin/maintenance/status" style="display:flex; gap:0.5rem; flex-wrap:wrap;">
                 <input type="hidden" name="request_id" value="${escapeHtml(request.id)}" />
@@ -2780,7 +3120,7 @@ function adminMaintenancePage(user, db, flash = "", filters = {}) {
           </tr>`;
         })
         .join("")
-    : `<tr><td colspan="5" style="padding:1rem 0.75rem; color:var(--text-secondary);">No maintenance requests yet.</td></tr>`;
+    : `<tr><td colspan="6" style="padding:1rem 0.75rem; color:var(--text-secondary);">No maintenance requests yet.</td></tr>`;
 
   return layoutPage({
     title: "Maintenance - Godstime Lodge",
@@ -2792,9 +3132,9 @@ function adminMaintenancePage(user, db, flash = "", filters = {}) {
       ${sectionHeader("Maintenance", "Track and update tenant requests from one page.", flash)}
       <div class="stats-grid">
         <div class="stat-card"><div class="stat-label">Requests</div><div class="stat-value">${requests.length}</div><div class="stat-change positive">All maintenance tickets</div></div>
-        <div class="stat-card"><div class="stat-label">Open</div><div class="stat-value">${requests.filter((request) => request.status === "open").length}</div><div class="stat-change positive">Waiting to be handled</div></div>
-        <div class="stat-card"><div class="stat-label">In Progress</div><div class="stat-value">${requests.filter((request) => request.status === "in-progress").length}</div><div class="stat-change positive">Being worked on</div></div>
-        <div class="stat-card"><div class="stat-label">Resolved</div><div class="stat-value">${requests.filter((request) => request.status === "resolved").length}</div><div class="stat-change positive">Closed tickets</div></div>
+        <div class="stat-card"><div class="stat-label">Open</div><div class="stat-value">${openRequests.length}</div><div class="stat-change positive">Waiting to be handled</div></div>
+        <div class="stat-card"><div class="stat-label">Overdue</div><div class="stat-value">${overdueRequests.length}</div><div class="stat-change ${overdueRequests.length ? "negative" : "positive"}">${overdueRequests.length ? "Past the SLA target" : "Within the SLA target"}</div></div>
+        <div class="stat-card"><div class="stat-label">Due Soon</div><div class="stat-value">${urgentRequests.length}</div><div class="stat-change positive">${latestOpenRequest ? latestOpenRequestSla.label : "No open request"}</div></div>
       </div>
       <div class="card" style="margin-bottom:1.5rem;">
         <div class="card-header"><div><h3 class="card-title">Find Requests</h3><p class="card-subtitle">Search by tenant, issue title, or description</p></div></div>
@@ -2805,6 +3145,7 @@ function adminMaintenancePage(user, db, flash = "", filters = {}) {
             <option value="open" ${statusFilter === "open" ? "selected" : ""}>Open</option>
             <option value="in-progress" ${statusFilter === "in-progress" ? "selected" : ""}>In Progress</option>
             <option value="resolved" ${statusFilter === "resolved" ? "selected" : ""}>Resolved</option>
+            <option value="overdue" ${statusFilter === "overdue" ? "selected" : ""}>Overdue</option>
           </select>
           <button type="submit" class="btn btn-primary">Filter</button>
         </form>
@@ -2820,6 +3161,7 @@ function adminMaintenancePage(user, db, flash = "", filters = {}) {
                   <th style="padding:0.9rem 0.75rem;">Title</th>
                   <th style="padding:0.9rem 0.75rem;">Description</th>
                   <th style="padding:0.9rem 0.75rem;">Status</th>
+                  <th style="padding:0.9rem 0.75rem;">SLA</th>
                   <th style="padding:0.9rem 0.75rem;">Action</th>
                 </tr>
               </thead>
@@ -2952,6 +3294,7 @@ const server = http.createServer(async (req, res) => {
       db.users.push(tenant);
       invite.usedAt = new Date().toISOString();
       saveDb(db);
+      notifyRealtimeChange();
 
       const session = persistSession(tenant.id);
       res.setHeader("Set-Cookie", buildSessionCookie(session.id, Math.floor(SESSION_TTL_MS / 1000)));
@@ -2980,6 +3323,41 @@ const server = http.createServer(async (req, res) => {
         email,
         message: `Invite confirmed for ${invite.fullName || fullName}${invite.unit ? ` • ${invite.unit}` : ""}. Your email will be ${email}.`,
       });
+    }
+
+    if (pathname === "/api/notifications") {
+      if (method !== "GET") return sendText(res, 405, "Method Not Allowed", { Allow: "GET" });
+      const user = requireLogin(req, res);
+      if (!user) return;
+      const db = loadDb();
+      return sendJson(res, 200, buildRealtimeNotificationPayload(user, db));
+    }
+
+    if (pathname === "/api/notifications/stream") {
+      if (method !== "GET") return sendText(res, 405, "Method Not Allowed", { Allow: "GET" });
+      const user = requireLogin(req, res);
+      if (!user) return;
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-store",
+        Connection: "keep-alive",
+      });
+      res.write(`data: ${JSON.stringify({ version: notificationVersion, role: user.role })}\n\n`);
+      const client = { res, userId: user.id, role: user.role };
+      notificationClients.add(client);
+      const keepAlive = setInterval(() => {
+        try {
+          res.write(": keep-alive\n\n");
+        } catch (error) {
+          clearInterval(keepAlive);
+          notificationClients.delete(client);
+        }
+      }, 25000);
+      req.on("close", () => {
+        clearInterval(keepAlive);
+        notificationClients.delete(client);
+      });
+      return;
     }
 
     if (pathname === "/logout") {
@@ -3036,6 +3414,7 @@ const server = http.createServer(async (req, res) => {
       db.payments.push(createPayment({ tenantId: user.id, billId, amount, note }));
       syncBillStatuses(db);
       saveDb(db);
+      notifyRealtimeChange();
       return redirectWithMessage(res, "/tenant/payments", "Payment submitted successfully.");
     }
 
@@ -3058,6 +3437,7 @@ const server = http.createServer(async (req, res) => {
       const db = loadDb();
       db.maintenanceRequests.push(createMaintenanceRequest({ tenantId: user.id, title, description }));
       saveDb(db);
+      notifyRealtimeChange();
       return redirectWithMessage(res, "/tenant/requests", "Maintenance request sent.");
     }
 
@@ -3127,6 +3507,7 @@ const server = http.createServer(async (req, res) => {
         tenant.passwordHash = replacement.passwordHash;
       }
       saveDb(db);
+      notifyRealtimeChange();
       return redirectWithMessage(res, "/admin/tenants", "Tenant record updated successfully.");
     }
 
@@ -3167,6 +3548,7 @@ const server = http.createServer(async (req, res) => {
         ...db.tenantInvites.map((item) => item.email),
       ] }));
       saveDb(db);
+      notifyRealtimeChange();
       return redirectWithMessage(res, "/admin/tenants", `Tenant invite created. Share code ${inviteCode} with ${fullName}. Their email is ${email}.`);
     }
 
@@ -3243,6 +3625,7 @@ const server = http.createServer(async (req, res) => {
       }
       db.settings.announcement = announcement;
       saveDb(db);
+      notifyRealtimeChange();
       return redirectWithMessage(res, "/admin/settings", "Settings updated successfully.");
     }
 
@@ -3273,6 +3656,7 @@ const server = http.createServer(async (req, res) => {
       db.bills.push(createBill({ tenantId, title, amount, dueDate }));
       syncBillStatuses(db);
       saveDb(db);
+      notifyRealtimeChange();
       return redirectWithMessage(res, "/admin/bills", "Bill created successfully.");
     }
 
@@ -3307,8 +3691,12 @@ const server = http.createServer(async (req, res) => {
         return redirectWithMessage(res, "/admin/payments", "Choose a valid payment status.");
       }
       payment.status = nextStatus;
+      payment.reviewedAt = new Date().toISOString();
+      payment.statusHistory = Array.isArray(payment.statusHistory) ? payment.statusHistory : [];
+      payment.statusHistory.push(createStatusHistoryEntry(nextStatus, `Payment ${nextStatus}.`, payment.reviewedAt));
       syncBillStatuses(db);
       saveDb(db);
+      notifyRealtimeChange();
       return redirectWithMessage(res, "/admin/payments", "Payment status updated.");
     }
 
@@ -3339,8 +3727,19 @@ const server = http.createServer(async (req, res) => {
       if (!["open", "in-progress", "resolved"].includes(nextStatus)) {
         return redirectWithMessage(res, "/admin/maintenance", "Choose a valid maintenance status.");
       }
+      const now = new Date().toISOString();
       request.status = nextStatus;
+      request.updatedAt = now;
+      if (!request.firstResponseAt && nextStatus !== "open") {
+        request.firstResponseAt = now;
+      }
+      if (nextStatus === "resolved") {
+        request.resolvedAt = now;
+      }
+      request.statusHistory = Array.isArray(request.statusHistory) ? request.statusHistory : [];
+      request.statusHistory.push(createStatusHistoryEntry(nextStatus, `Maintenance request marked ${nextStatus}.`, now));
       saveDb(db);
+      notifyRealtimeChange();
       return redirectWithMessage(res, "/admin/maintenance", "Maintenance status updated.");
     }
 
