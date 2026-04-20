@@ -20,6 +20,7 @@ const MAX_BODY_SIZE = 1024 * 1024;
 const MAX_UPLOAD_BODY_SIZE = 8 * 1024 * 1024;
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const DB_PATH = path.join(DATA_DIR, "node-db.json");
+const SEED_DB_PATH = path.join(__dirname, "data", "node-db.json");
 const PUBLIC_DIR = path.join(__dirname, "public");
 const ASSETS_DIR = path.join(PUBLIC_DIR, "assets");
 const PAYMENT_SYMBOL_MARKUP = '<text x="12" y="16" text-anchor="middle" font-size="15" font-weight="700" fill="currentColor">₦</text>';
@@ -199,6 +200,16 @@ function createDefaultDb() {
   };
 }
 
+function readSeedDb() {
+  if (!fs.existsSync(SEED_DB_PATH)) return null;
+  try {
+    const raw = JSON.parse(fs.readFileSync(SEED_DB_PATH, "utf8"));
+    return syncBillStatuses(normalizeDb(raw));
+  } catch (error) {
+    return null;
+  }
+}
+
 function normalizeDb(db) {
   const settings = db && typeof db.settings === "object" && db.settings ? db.settings : {};
   return {
@@ -288,7 +299,7 @@ async function ensureDatabaseReady() {
   if (!DATABASE_URL) {
     ensureDataDir();
     if (!fs.existsSync(DB_PATH)) {
-      dbCache = createDefaultDb();
+      dbCache = readSeedDb() || createDefaultDb();
       persistDbToFile(dbCache);
     } else {
       dbCache = normalizeDb(JSON.parse(fs.readFileSync(DB_PATH, "utf8")));
@@ -316,7 +327,7 @@ async function ensureDatabaseReady() {
     dbCache = normalizeDb(result.rows[0].data);
     dbCache = syncBillStatuses(dbCache);
   } else {
-    dbCache = createDefaultDb();
+    dbCache = readSeedDb() || createDefaultDb();
     await dbPool.query(
       `INSERT INTO app_state (state_key, data, updated_at)
        VALUES ($1, $2::jsonb, NOW())`,
