@@ -86,7 +86,7 @@ function createBill({ tenantId, title, amount, dueDate, status = "unpaid" }) {
   };
 }
 
-function createPayment({ tenantId, billId, amount, note }) {
+function createPayment({ tenantId, billId, amount, note, proofLinks = [] }) {
   const createdAt = new Date().toISOString();
   return {
     id: randomId(12),
@@ -94,6 +94,8 @@ function createPayment({ tenantId, billId, amount, note }) {
     billId: String(billId || "").trim(),
     amount: Number(amount) || 0,
     note: String(note || "").trim(),
+    proofLinks: normalizeSupportLinks(proofLinks, 4),
+    discussion: note ? [createThreadEntry("tenant", `Payment note: ${note}`, createdAt, "Tenant")] : [],
     status: "pending",
     createdAt,
     reviewedAt: "",
@@ -108,7 +110,7 @@ function createPayment({ tenantId, billId, amount, note }) {
   };
 }
 
-function createMaintenanceRequest({ tenantId, title, description, evidenceNote = "" }) {
+function createMaintenanceRequest({ tenantId, title, description, evidenceNote = "", evidenceLinks = [] }) {
   const createdAt = new Date().toISOString();
   const slaHours = 72;
   return {
@@ -117,6 +119,11 @@ function createMaintenanceRequest({ tenantId, title, description, evidenceNote =
     title: String(title || "").trim(),
     description: String(description || "").trim(),
     evidenceNote: normalizeLine(evidenceNote || "", 160),
+    evidenceLinks: normalizeSupportLinks(evidenceLinks, 4),
+    discussion: [
+      createThreadEntry("tenant", `Request: ${description || title || "Maintenance issue"}`, createdAt, "Tenant"),
+      ...(evidenceNote ? [createThreadEntry("tenant", `Evidence note: ${evidenceNote}`, createdAt, "Tenant")] : []),
+    ],
     status: "open",
     createdAt,
     slaHours,
@@ -180,6 +187,10 @@ function normalizeDb(db) {
       ? db.payments.map((payment) => ({
           ...payment,
           note: normalizeLine(payment.note || "", 120),
+          proofLinks: normalizeSupportLinks(payment.proofLinks || payment.attachments || payment.proofLinksText || payment.evidenceLinks, 4),
+          discussion: normalizeThreadEntries(payment.discussion, payment.note ? [
+            createThreadEntry("tenant", `Payment note: ${payment.note}`, payment.createdAt || new Date().toISOString(), "Tenant"),
+          ] : []),
           status: String(payment.status || "pending").trim() || "pending",
           createdAt: String(payment.createdAt || "").trim(),
           reviewedAt: String(payment.reviewedAt || "").trim(),
@@ -197,6 +208,11 @@ function normalizeDb(db) {
           title: normalizeLine(request.title || "", 80),
           description: normalizeLine(request.description || "", 400),
           evidenceNote: normalizeLine(request.evidenceNote || "", 160),
+          evidenceLinks: normalizeSupportLinks(request.evidenceLinks || request.attachments || request.evidenceLinksText, 4),
+          discussion: normalizeThreadEntries(request.discussion, [
+            createThreadEntry("tenant", `Request: ${request.description || request.title || "Maintenance issue"}`, request.createdAt || new Date().toISOString(), "Tenant"),
+            ...(request.evidenceNote ? [createThreadEntry("tenant", `Evidence note: ${request.evidenceNote}`, request.createdAt || new Date().toISOString(), "Tenant")] : []),
+          ]),
           status: String(request.status || "open").trim() || "open",
           createdAt: String(request.createdAt || "").trim(),
           slaHours: Math.max(1, Number(request.slaHours) || 72),
@@ -514,6 +530,51 @@ function createTrailEntry(status, detail, at = new Date().toISOString(), actor =
   };
 }
 
+function normalizeSupportLinks(value, maxItems = 4) {
+  const raw = Array.isArray(value)
+    ? value
+    : String(value || "")
+        .split(/[\n,]+/)
+        .map((item) => item);
+  return raw
+    .map((item) => normalizeLine(item, 180))
+    .filter(Boolean)
+    .slice(0, maxItems);
+}
+
+function createThreadEntry(authorRole, body, at = new Date().toISOString(), authorName = "") {
+  return {
+    authorRole: String(authorRole || "system").trim() || "system",
+    authorName: normalizeLine(authorName || "", 60),
+    body: normalizeLine(body || "", 260),
+    at: String(at || "").trim() || new Date().toISOString(),
+  };
+}
+
+function normalizeThreadEntries(entries, fallbackEntries = []) {
+  const normalized = Array.isArray(entries)
+    ? entries
+        .map((entry) => createThreadEntry(
+          (entry && entry.authorRole) || (entry && entry.actor) || "system",
+          (entry && entry.body) || (entry && entry.detail) || "",
+          (entry && entry.at) || (entry && entry.createdAt) || new Date().toISOString(),
+          (entry && entry.authorName) || ""
+        ))
+        .filter((entry) => entry.body && entry.at)
+    : [];
+  if (normalized.length) return normalized;
+  return Array.isArray(fallbackEntries)
+    ? fallbackEntries
+        .map((entry) => createThreadEntry(
+          entry.authorRole || entry.actor || "system",
+          entry.body || entry.detail || "",
+          entry.at || new Date().toISOString(),
+          entry.authorName || ""
+        ))
+        .filter((entry) => entry.body && entry.at)
+    : [];
+}
+
 function formatStatusLabel(status) {
   return String(status || "")
     .replace(/-/g, " ")
@@ -688,10 +749,41 @@ function renderShellChrome({
 }) {
   const avatar = escapeHtml((user.fullName || "A").slice(0, 1).toUpperCase());
   const name = escapeHtml(user.fullName || "User");
-  const findNavItem = (href) => navLinks.find((item) => item.href === href) || null;
+  const supplementalLinks = user.role === "admin"
+    ? [
+        {
+          href: "/admin/bills",
+          label: "Bills",
+          icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="13" y2="15"/></svg>',
+        },
+        {
+          href: "/admin/maintenance",
+          label: "Maintenance",
+          icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+        },
+        {
+          href: "/admin/disputes",
+          label: "Disputes",
+          icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><path d="M12 18h.01"/><path d="M5 5l14 14"/></svg>',
+        },
+      ]
+    : user.role === "tenant"
+    ? [
+        {
+          href: "/tenant/disputes",
+          label: "Disputes",
+          icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><path d="M12 18h.01"/><path d="M5 5l14 14"/></svg>',
+        },
+      ]
+    : [];
+  const visibleNavLinks = [
+    ...navLinks,
+    ...supplementalLinks.filter((item) => !navLinks.some((existing) => existing.href === item.href)),
+  ];
+  const findNavItem = (href) => visibleNavLinks.find((item) => item.href === href) || null;
   const roleQuickLinkHrefs = user.role === "tenant"
-    ? ["/tenant/dashboard", "/tenant/bills", "/tenant/payments", "/tenant/requests"]
-    : ["/admin/dashboard", "/admin/analytics", "/admin/tenants", "/admin/payments"];
+    ? ["/tenant/dashboard", "/tenant/bills", "/tenant/payments", "/tenant/requests", "/tenant/disputes"]
+    : ["/admin/dashboard", "/admin/analytics", "/admin/tenants", "/admin/payments", "/admin/bills", "/admin/maintenance", "/admin/disputes"];
   const quickLinksSource = roleQuickLinkHrefs
     .map(findNavItem)
     .filter(Boolean);
@@ -704,7 +796,7 @@ function renderShellChrome({
     : null;
   const isItemActive = (item) => activePath === item.href || (Array.isArray(item.children) && item.children.some((child) => activePath === child.href));
   const links = showNavLinks
-    ? navLinks
+    ? visibleNavLinks
         .map(
           (item) => item.children && item.children.length
             ? `<div class="nav-item nav-item-has-dropdown">
@@ -732,7 +824,7 @@ function renderShellChrome({
         .join("")
     : "";
   const mobileLinks = showMobileMenu
-    ? navLinks
+    ? visibleNavLinks
         .map(
           (item) => item.children && item.children.length
             ? `<div class="mobile-menu-group">
@@ -921,6 +1013,36 @@ function renderStatusTrail(entries, emptyMessage) {
         .join("")
     : `<div style="padding:1rem; color:var(--text-secondary);">${escapeHtml(emptyMessage)}</div>`;
   return `<div class="status-timeline">${items}</div>`;
+}
+
+function renderSupportLinks(links, emptyMessage = "No supporting documents attached.") {
+  const items = Array.isArray(links) && links.length
+    ? `<ul class="support-link-list">${links.map((link) => `<li><span class="support-link-dot"></span><a href="${escapeHtml(link)}" target="_blank" rel="noreferrer">${escapeHtml(link)}</a></li>`).join("")}</ul>`
+    : `<div style="padding:0.85rem 0; color:var(--text-secondary);">${escapeHtml(emptyMessage)}</div>`;
+  return items;
+}
+
+function renderDiscussionThread(entries, emptyMessage) {
+  const items = Array.isArray(entries) && entries.length
+    ? entries
+        .map((entry) => {
+          const actorLabel = entry.authorRole === "management"
+            ? "Management"
+            : entry.authorRole === "tenant"
+            ? "Tenant"
+            : "System";
+          const nameLabel = entry.authorName ? ` • ${escapeHtml(entry.authorName)}` : "";
+          return `<div class="discussion-thread-item">
+            <div class="discussion-thread-head">
+              <strong>${escapeHtml(actorLabel)}</strong>${nameLabel}
+              <span>${escapeHtml(formatDateTime(entry.at))}</span>
+            </div>
+            <p>${escapeHtml(entry.body || "")}</p>
+          </div>`;
+        })
+        .join("")
+    : `<div style="padding:1rem; color:var(--text-secondary);">${escapeHtml(emptyMessage)}</div>`;
+  return `<div class="discussion-thread">${items}</div>`;
 }
 
 function renderReminderSection(title, subtitle, items, emptyMessage) {
@@ -1634,6 +1756,12 @@ function tenantPaymentsPage(user, db, flash = "") {
   const latestPaymentTrail = latestPayment
     ? renderStatusTrail(latestPayment.statusHistory, "This payment does not have a review trail yet.")
     : `<div style="padding:1rem; color:var(--text-secondary);">Submit a payment to build a proof trail.</div>`;
+  const latestPaymentLinks = latestPayment
+    ? renderSupportLinks(latestPayment.proofLinks, "No supporting documents attached to this payment.")
+    : `<div style="padding:1rem; color:var(--text-secondary);">Attach a receipt, screenshot, or reference link when you submit a payment.</div>`;
+  const latestPaymentThread = latestPayment
+    ? renderDiscussionThread(latestPayment.discussion, "No follow-up notes yet.")
+    : `<div style="padding:1rem; color:var(--text-secondary);">Follow-up notes will appear here once you add them.</div>`;
 
   return layoutPage({
     title: "My Payments - Godstime Lodge",
@@ -1650,6 +1778,7 @@ function tenantPaymentsPage(user, db, flash = "") {
             <div class="form-group"><label class="form-label">Bill</label><select name="bill_id" class="form-input" ${bills.length ? "" : "disabled"}>${options}</select></div>
             <div class="form-group"><label class="form-label">Amount</label><input name="amount" type="number" min="0" step="100" class="form-input" placeholder="e.g. 250000" required /></div>
             <div class="form-group"><label class="form-label">Proof / Reference Note</label><input name="note" type="text" maxlength="120" class="form-input" placeholder="Transfer reference, bank note, or proof detail" /></div>
+            <div class="form-group"><label class="form-label">Supporting Document Links</label><input name="proof_links" type="text" maxlength="240" class="form-input" placeholder="Paste receipt links or evidence URLs separated by commas" /></div>
             <button type="submit" class="btn btn-primary" ${bills.length ? "" : "disabled"}>Submit Payment</button>
           </form>
         </div>
@@ -1674,6 +1803,33 @@ function tenantPaymentsPage(user, db, flash = "") {
           </div>
         ` : ""}
         ${latestPaymentTrail}
+        </div>
+      </div>
+      <div class="two-col" style="margin-top:1.5rem;">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title">Supporting Documents</h3>
+              <p class="card-subtitle">Receipts, bank references, or screenshots tied to the latest payment</p>
+            </div>
+          </div>
+          <div style="padding:1rem 1.25rem;">${latestPaymentLinks}</div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title">Follow-up Thread</h3>
+              <p class="card-subtitle">Use this for proof or dispute notes with management</p>
+            </div>
+          </div>
+          <div style="padding:1rem 1.25rem;">${latestPaymentThread}</div>
+          ${latestPayment ? `
+          <form method="post" action="/tenant/payments/comment" style="padding:0 1.25rem 1.25rem; display:grid; gap:0.85rem;">
+            <input type="hidden" name="payment_id" value="${escapeHtml(latestPayment.id)}" />
+            <div class="form-group"><label class="form-label">Add Note</label><input name="comment" type="text" maxlength="160" class="form-input" placeholder="Add context or a follow-up question" required /></div>
+            <button type="submit" class="btn btn-secondary">Add Payment Note</button>
+          </form>
+          ` : ""}
         </div>
       </div>
     </main>`,
@@ -1703,6 +1859,12 @@ function tenantMaintenancePage(user, db, flash = "") {
   const latestRequestTrail = latestRequest
     ? renderStatusTrail(latestRequest.statusHistory, "This request does not have a status trail yet.")
     : `<div style="padding:1rem; color:var(--text-secondary);">Create a request to build a status trail.</div>`;
+  const latestRequestLinks = latestRequest
+    ? renderSupportLinks(latestRequest.evidenceLinks, "No supporting documents attached to this request.")
+    : `<div style="padding:1rem; color:var(--text-secondary);">Attach photo links or evidence URLs with the request.</div>`;
+  const latestRequestThread = latestRequest
+    ? renderDiscussionThread(latestRequest.discussion, "No follow-up notes yet.")
+    : `<div style="padding:1rem; color:var(--text-secondary);">Follow-up notes will appear here once you add them.</div>`;
 
   return layoutPage({
     title: "Maintenance - Godstime Lodge",
@@ -1742,6 +1904,7 @@ function tenantMaintenancePage(user, db, flash = "") {
             <div class="form-group"><label class="form-label">Title</label><input name="title" type="text" maxlength="80" class="form-input" placeholder="e.g. Water leak in bathroom" required /></div>
             <div class="form-group"><label class="form-label">Description</label><textarea name="description" class="form-input" rows="4" maxlength="400" placeholder="Describe the issue" required></textarea></div>
             <div class="form-group"><label class="form-label">Evidence / Context Note</label><input name="evidence_note" type="text" maxlength="160" class="form-input" placeholder="Add photos, location detail, or supporting context" /></div>
+            <div class="form-group"><label class="form-label">Evidence Links</label><input name="evidence_links" type="text" maxlength="240" class="form-input" placeholder="Paste image or document links separated by commas" /></div>
             <button type="submit" class="btn btn-primary">Send Request</button>
           </form>
         </div>
@@ -1783,6 +1946,93 @@ function tenantMaintenancePage(user, db, flash = "") {
             </div>
           ` : ""}
           ${latestRequestTrail}
+        </div>
+      </div>
+      <div class="two-col" style="margin-top:1.5rem;">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title">Evidence Folder</h3>
+              <p class="card-subtitle">Photos, links, or documents tied to the latest request</p>
+            </div>
+          </div>
+          <div style="padding:1rem 1.25rem;">${latestRequestLinks}</div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title">Follow-up Thread</h3>
+              <p class="card-subtitle">Keep a running note with management until the issue is closed</p>
+            </div>
+          </div>
+          <div style="padding:1rem 1.25rem;">${latestRequestThread}</div>
+          ${latestRequest ? `
+          <form method="post" action="/tenant/requests/comment" style="padding:0 1.25rem 1.25rem; display:grid; gap:0.85rem;">
+            <input type="hidden" name="request_id" value="${escapeHtml(latestRequest.id)}" />
+            <div class="form-group"><label class="form-label">Add Note</label><input name="comment" type="text" maxlength="160" class="form-input" placeholder="Add a follow-up note or question" required /></div>
+            <button type="submit" class="btn btn-secondary">Add Maintenance Note</button>
+          </form>
+          ` : ""}
+        </div>
+      </div>
+    </main>`,
+  });
+}
+
+function tenantDisputesPage(user, db, flash = "") {
+  const payments = db.payments
+    .filter((payment) => payment.tenantId === user.id)
+    .sort(compareNewestFirst);
+  const requests = db.maintenanceRequests
+    .filter((request) => request.tenantId === user.id)
+    .sort(compareNewestFirst);
+  const openPayments = payments.filter((payment) => payment.status === "pending");
+  const openRequests = requests.filter((request) => request.status !== "resolved");
+  const proofItems = payments
+    .slice(0, 3)
+    .map((payment) => `<article class="dispute-card">
+      <div class="dispute-card-head">
+        <strong>${escapeHtml(formatCurrency(payment.amount))}</strong>
+        <span class="badge badge-${getPaymentStatusTone(payment.status)}">${escapeHtml(payment.status)}</span>
+      </div>
+      <p>${escapeHtml(payment.note || "No note added")}</p>
+      <div class="dispute-meta">Submitted ${escapeHtml(formatDateTime(payment.createdAt))}</div>
+    </article>`)
+    .join("");
+  const maintenanceItems = requests
+    .slice(0, 3)
+    .map((request) => `<article class="dispute-card">
+      <div class="dispute-card-head">
+        <strong>${escapeHtml(request.title)}</strong>
+        <span class="badge badge-${getMaintenanceStatusTone(request.status)}">${escapeHtml(request.status)}</span>
+      </div>
+      <p>${escapeHtml(request.description)}</p>
+      <div class="dispute-meta">Created ${escapeHtml(formatDateTime(request.createdAt))}</div>
+    </article>`)
+    .join("");
+
+  return layoutPage({
+    title: "Disputes - Godstime Lodge",
+    activePath: "/tenant/disputes",
+    user,
+    roleLabel: "Tenant Portal",
+    navLinks: tenantNavLinks(),
+    body: `<main class="main-content">
+      ${sectionHeader("Disputes", "Your proof trail for payments and maintenance in one place.", flash)}
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-label">Payment Notes</div><div class="stat-value">${payments.length}</div><div class="stat-change positive">${openPayments.length} pending review</div></div>
+        <div class="stat-card"><div class="stat-label">Maintenance Tickets</div><div class="stat-value">${requests.length}</div><div class="stat-change positive">${openRequests.length} still open</div></div>
+        <div class="stat-card"><div class="stat-label">Evidence Links</div><div class="stat-value">${payments.reduce((sum, payment) => sum + (Array.isArray(payment.proofLinks) ? payment.proofLinks.length : 0), 0) + requests.reduce((sum, request) => sum + (Array.isArray(request.evidenceLinks) ? request.evidenceLinks.length : 0), 0)}</div><div class="stat-change positive">Supporting documents attached</div></div>
+        <div class="stat-card"><div class="stat-label">Follow-ups</div><div class="stat-value">${payments.reduce((sum, payment) => sum + (Array.isArray(payment.discussion) ? payment.discussion.length : 0), 0) + requests.reduce((sum, request) => sum + (Array.isArray(request.discussion) ? request.discussion.length : 0), 0)}</div><div class="stat-change positive">Tenant and management notes</div></div>
+      </div>
+      <div class="two-col">
+        <div class="card">
+          <div class="card-header"><div><h3 class="card-title">Payment Proof</h3><p class="card-subtitle">Receipts, notes, and review history for your last few payments</p></div></div>
+          <div style="padding:1rem 1.25rem; display:grid; gap:0.85rem;">${proofItems || `<div style="color:var(--text-secondary);">No payments yet.</div>`}</div>
+        </div>
+        <div class="card">
+          <div class="card-header"><div><h3 class="card-title">Maintenance Evidence</h3><p class="card-subtitle">Requests, photos, and timeline notes for unresolved issues</p></div></div>
+          <div style="padding:1rem 1.25rem; display:grid; gap:0.85rem;">${maintenanceItems || `<div style="color:var(--text-secondary);">No maintenance requests yet.</div>`}</div>
         </div>
       </div>
     </main>`,
@@ -3200,6 +3450,42 @@ function adminMaintenancePage(user, db, flash = "", filters = {}) {
   });
 }
 
+function adminDisputesPage(user, db, flash = "") {
+  const payments = [...db.payments].sort(compareNewestFirst);
+  const requests = [...db.maintenanceRequests].sort(compareNewestFirst);
+  const pendingPayments = payments.filter((payment) => payment.status === "pending");
+  const openRequests = requests.filter((request) => request.status !== "resolved");
+  const recentPayment = payments[0] || null;
+  const recentRequest = requests[0] || null;
+
+  return layoutPage({
+    title: "Disputes - Godstime Lodge",
+    activePath: "/admin/disputes",
+    user,
+    roleLabel: "Admin Dashboard",
+    navLinks: adminNavLinks(),
+    body: `<main class="main-content">
+      ${sectionHeader("Disputes Overview", "Watch payment proof and maintenance evidence in one place.", flash)}
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-label">Pending Payments</div><div class="stat-value">${pendingPayments.length}</div><div class="stat-change positive">Waiting for review</div></div>
+        <div class="stat-card"><div class="stat-label">Open Maintenance</div><div class="stat-value">${openRequests.length}</div><div class="stat-change positive">Still unresolved</div></div>
+        <div class="stat-card"><div class="stat-label">Evidence Links</div><div class="stat-value">${payments.reduce((sum, payment) => sum + (Array.isArray(payment.proofLinks) ? payment.proofLinks.length : 0), 0) + requests.reduce((sum, request) => sum + (Array.isArray(request.evidenceLinks) ? request.evidenceLinks.length : 0), 0)}</div><div class="stat-change positive">Attached support files</div></div>
+        <div class="stat-card"><div class="stat-label">Follow-ups</div><div class="stat-value">${payments.reduce((sum, payment) => sum + (Array.isArray(payment.discussion) ? payment.discussion.length : 0), 0) + requests.reduce((sum, request) => sum + (Array.isArray(request.discussion) ? request.discussion.length : 0), 0)}</div><div class="stat-change positive">Tenant and management notes</div></div>
+      </div>
+      <div class="two-col">
+        <div class="card">
+          <div class="card-header"><div><h3 class="card-title">Payment Trail</h3><p class="card-subtitle">Recent payment proof and response notes</p></div></div>
+          <div style="padding:1rem 1.25rem;">${recentPayment ? renderDiscussionThread(recentPayment.discussion, "No payment follow-up notes yet.") : `<div style="color:var(--text-secondary);">No payments yet.</div>`}</div>
+        </div>
+        <div class="card">
+          <div class="card-header"><div><h3 class="card-title">Maintenance Trail</h3><p class="card-subtitle">Recent maintenance evidence and response notes</p></div></div>
+          <div style="padding:1rem 1.25rem;">${recentRequest ? renderDiscussionThread(recentRequest.discussion, "No maintenance follow-up notes yet.") : `<div style="color:var(--text-secondary);">No maintenance requests yet.</div>`}</div>
+        </div>
+      </div>
+    </main>`,
+  });
+}
+
 function requireLogin(req, res) {
   const user = getCurrentUser(req);
   if (!user) {
@@ -3430,6 +3716,7 @@ const server = http.createServer(async (req, res) => {
       const amount = Number(form.amount || 0);
       const billId = normalizeLine(form.bill_id, 40);
       const note = normalizeLine(form.note, 120);
+      const proofLinks = normalizeSupportLinks(form.proof_links, 4);
       if (amount <= 0) return redirectWithMessage(res, "/tenant/payments", "Enter a valid payment amount.");
       const db = loadDb();
       const bill = db.bills.find((item) => item.id === billId && item.tenantId === user.id);
@@ -3437,11 +3724,31 @@ const server = http.createServer(async (req, res) => {
       if (getBillStatus(bill) === "paid") {
         return redirectWithMessage(res, "/tenant/payments", "That bill is already marked as paid.");
       }
-      db.payments.push(createPayment({ tenantId: user.id, billId, amount, note }));
+      db.payments.push(createPayment({ tenantId: user.id, billId, amount, note, proofLinks }));
       syncBillStatuses(db);
       saveDb(db);
       notifyRealtimeChange();
       return redirectWithMessage(res, "/tenant/payments", "Payment submitted successfully.");
+    }
+
+    if (pathname === "/tenant/payments/comment") {
+      const user = requireRole(req, res, "tenant");
+      if (!user) return;
+      if (method !== "POST") return sendText(res, 405, "Method Not Allowed", { Allow: "POST" });
+      if (!isFormRequest(req)) return redirectWithMessage(res, "/tenant/payments", "Unsupported payment note.");
+      const body = await readBody(req);
+      const form = parseForm(body);
+      const comment = normalizeLine(form.comment, 160);
+      const paymentId = normalizeLine(form.payment_id, 40);
+      if (!comment) return redirectWithMessage(res, "/tenant/payments", "Add a note before submitting.");
+      const db = loadDb();
+      const payment = db.payments.find((item) => item.id === paymentId && item.tenantId === user.id);
+      if (!payment) return redirectWithMessage(res, "/tenant/payments", "Payment not found.");
+      payment.discussion = Array.isArray(payment.discussion) ? payment.discussion : [];
+      payment.discussion.push(createThreadEntry("tenant", comment, new Date().toISOString(), user.fullName || "Tenant"));
+      saveDb(db);
+      notifyRealtimeChange();
+      return redirectWithMessage(res, "/tenant/payments", "Payment note added.");
     }
 
     if (pathname === "/tenant/requests") {
@@ -3458,14 +3765,42 @@ const server = http.createServer(async (req, res) => {
       const title = normalizeLine(form.title, 80);
       const description = normalizeLine(form.description, 400);
       const evidenceNote = normalizeLine(form.evidence_note, 160);
+      const evidenceLinks = normalizeSupportLinks(form.evidence_links, 4);
       if (!title || !description) {
         return redirectWithMessage(res, "/tenant/requests", "Please add a title and description for the maintenance request.");
       }
       const db = loadDb();
-      db.maintenanceRequests.push(createMaintenanceRequest({ tenantId: user.id, title, description, evidenceNote }));
+      db.maintenanceRequests.push(createMaintenanceRequest({ tenantId: user.id, title, description, evidenceNote, evidenceLinks }));
       saveDb(db);
       notifyRealtimeChange();
       return redirectWithMessage(res, "/tenant/requests", "Maintenance request sent.");
+    }
+
+    if (pathname === "/tenant/requests/comment") {
+      const user = requireRole(req, res, "tenant");
+      if (!user) return;
+      if (method !== "POST") return sendText(res, 405, "Method Not Allowed", { Allow: "POST" });
+      if (!isFormRequest(req)) return redirectWithMessage(res, "/tenant/requests", "Unsupported request note.");
+      const body = await readBody(req);
+      const form = parseForm(body);
+      const comment = normalizeLine(form.comment, 160);
+      const requestId = normalizeLine(form.request_id, 40);
+      if (!comment) return redirectWithMessage(res, "/tenant/requests", "Add a note before submitting.");
+      const db = loadDb();
+      const request = db.maintenanceRequests.find((item) => item.id === requestId && item.tenantId === user.id);
+      if (!request) return redirectWithMessage(res, "/tenant/requests", "Maintenance request not found.");
+      request.discussion = Array.isArray(request.discussion) ? request.discussion : [];
+      request.discussion.push(createThreadEntry("tenant", comment, new Date().toISOString(), user.fullName || "Tenant"));
+      saveDb(db);
+      notifyRealtimeChange();
+      return redirectWithMessage(res, "/tenant/requests", "Maintenance note added.");
+    }
+
+    if (pathname === "/tenant/disputes") {
+      const user = requireRole(req, res, "tenant");
+      if (!user) return;
+      const db = loadDb();
+      return send(res, 200, tenantDisputesPage(user, db, String(url.searchParams.get("message") || "")));
     }
 
     if (pathname === "/tenant/account") {
@@ -3722,6 +4057,8 @@ const server = http.createServer(async (req, res) => {
       payment.reviewedAt = new Date().toISOString();
       payment.statusHistory = Array.isArray(payment.statusHistory) ? payment.statusHistory : [];
       payment.statusHistory.push(createTrailEntry(nextStatus, responseNote ? `Payment ${nextStatus}. ${responseNote}` : `Payment ${nextStatus}.`, payment.reviewedAt, "management"));
+      payment.discussion = Array.isArray(payment.discussion) ? payment.discussion : [];
+      payment.discussion.push(createThreadEntry("management", responseNote ? `Management ${nextStatus}: ${responseNote}` : `Management ${nextStatus} the payment.`, payment.reviewedAt, user.fullName || "Management"));
       syncBillStatuses(db);
       saveDb(db);
       notifyRealtimeChange();
@@ -3767,9 +4104,18 @@ const server = http.createServer(async (req, res) => {
       }
       request.statusHistory = Array.isArray(request.statusHistory) ? request.statusHistory : [];
       request.statusHistory.push(createTrailEntry(nextStatus, responseNote ? `Maintenance request marked ${nextStatus}. ${responseNote}` : `Maintenance request marked ${nextStatus}.`, now, "management"));
+      request.discussion = Array.isArray(request.discussion) ? request.discussion : [];
+      request.discussion.push(createThreadEntry("management", responseNote ? `Management ${nextStatus}: ${responseNote}` : `Management marked the request ${nextStatus}.`, now, user.fullName || "Management"));
       saveDb(db);
       notifyRealtimeChange();
       return redirectWithMessage(res, "/admin/maintenance", "Maintenance status updated.");
+    }
+
+    if (pathname === "/admin/disputes") {
+      const user = requireRole(req, res, "admin");
+      if (!user) return;
+      const db = loadDb();
+      return send(res, 200, adminDisputesPage(user, db, String(url.searchParams.get("message") || "")));
     }
 
     sendText(res, 404, "Not found");
